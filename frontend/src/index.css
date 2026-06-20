@@ -1,0 +1,107 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 98%; /* Creamy off-white #FAF9F6 */
+    --foreground: 20 14% 20%; /* Dark brown-grey */
+
+    --card: 0 0% 100%;
+    --card-foreground: 20 14% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 14% 20%;
+
+    --primary: 15 60% 65%; /* Clay/Terracotta #DD8A73 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 25 40% 92%; /* Soft peach #F4E5DD */
+    --secondary-foreground: 15 60% 40%; /* Dark clay */
+
+    --muted: 30 20% 94%;
+    --muted-foreground: 20 10% 45%;
+
+    --accent: 25 40% 92%;
+    --accent-foreground: 15 60% 40%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 30 20% 88%;
+    --input: 30 20% 88%;
+    --ring: 15 60% 65%;
+
+    --radius: 1rem; /* More rounded for clay feel */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  *::-webkit-scrollbar {
+    display: none;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-color: #FAF9F6;
+  }
+}
+
+/* Custom Gradients & Utilities */
+.text-gradient {
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-image: linear-gradient(135deg, #D47963 0%, #E6A291 100%);
+}
+
+.premium-card {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  box-shadow: 0 8px 24px -4px rgba(221, 138, 115, 0.1), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+}
+
+.premium-card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.premium-card-hover:hover {
+  box-shadow: 0 12px 32px -4px rgba(221, 138, 115, 0.2), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+  transform: translateY(-3px);
+}
+
+.theme-sidebar {
+  background-color: #F7EAE3; /* Soft clay pink/peach */
+}
+
+.theme-header {
+  background-color: #F7EAE3; 
+}
+
+.theme-active-item {
+  background-color: #EBD3C9; /* Slightly darker peach */
+  color: #B55F45; /* Dark clay text */
+  border-radius: 12px;
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.5), 0 2px 8px rgba(221, 138, 115, 0.1);
+}
+
+.theme-inactive-item {
+  color: #8C7C77;
+}
+.theme-inactive-item:hover {
+  background-color: #F2DED6;
+  color: #B55F45;
+  border-radius: 12px;
+}
+
+.terminal-bg {
+  background-color: #1e1e2e;
+  color: #a6accd;
+  font-family: 'Courier New', Courier, monospace;
+}
