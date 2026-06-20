@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     SERPAPI_KEY: str = os.getenv("SERPAPI_KEY", "")
     GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
     APOLLO_API_KEY: str = os.getenv("APOLLO_API_KEY", "")
+    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
     
     # Server Config
     HOST: str = os.getenv("HOST", "0.0.0.0")

@@ -30,6 +30,11 @@ async def discover_leads(request: DiscoveryRequest):
     try:
         logger.info(f"[API] Discovery request: {request.prompt}")
         result = await engine.discover(request)
+        
+        # Save to MongoDB
+        from database import save_leads
+        await save_leads(result.leads, request.prompt)
+        
         logger.info(f"[API] Discovery complete: {result.total_found} leads found")
         return result
     except ValueError as ve:

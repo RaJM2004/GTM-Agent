@@ -6,8 +6,16 @@ Main entry point for the FastAPI application.
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
 from api.discovery import router as discovery_router
+from database import connect_to_mongo, close_mongo_connection
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    connect_to_mongo()
+    yield
+    close_mongo_connection()
 
 # Configure logging
 logging.basicConfig(
@@ -20,7 +28,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Genquantaa GTM OS API",
     description="Backend API for Genquantaa GTM OS - AI Lead Discovery and Multi-channel Campaigns",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS Middleware
