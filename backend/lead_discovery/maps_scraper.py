@@ -11,9 +11,7 @@ from config import settings
 from schemas.discovery import LeadContact
 
 logger = logging.getLogger(__name__)
-PLACES_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-PLACES_DETAIL_URL = "https://maps.googleapis.com/maps/api/place/details/json"
-
+PLACES_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 
 class GoogleMapsScraper:
     def __init__(self):
@@ -42,19 +40,19 @@ class GoogleMapsScraper:
                 for place in places:
                     if len(all_leads) >= max_results:
                         break
-                    name = place.get("name", "")
-                    if name.lower() in seen:
+                    name_obj = place.get("displayName", {})
+                    name = name_obj.get("text", "") if isinstance(name_obj, dict) else name_obj
+                    if not name or name.lower() in seen:
                         continue
                     seen.add(name.lower())
                     
-                    detail = await self._get_details(place.get("place_id", ""))
                     lead = LeadContact(
                         name=f"{role.title()} at {name}" if role else name,
                         title=role.title() if role else "Company Contact",
                         company=name,
-                        phone=detail.get("formatted_phone_number", ""),
-                        website=detail.get("website", ""),
-                        location=detail.get("formatted_address", place.get("formatted_address", "")),
+                        phone=place.get("nationalPhoneNumber", ""),
+                        website=place.get("websiteUri", ""),
+                        location=place.get("formattedAddress", ""),
                         source="google_maps",
                         confidence=0.65,
                         industry=industry,
@@ -67,23 +65,16 @@ class GoogleMapsScraper:
         return all_leads
 
     async def _text_search(self, query: str) -> List[Dict]:
-        params = {"query": query, "key": self.api_key, "type": "establishment"}
-        resp = await self.client.get(PLACES_SEARCH_URL, params=params)
+        headers = {
+            "X-Goog-Api-Key": self.api_key,
+            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri",
+            "Content-Type": "application/json"
+        }
+        body = {"textQuery": query}
+        resp = await self.client.post(PLACES_SEARCH_URL, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("results", [])[:15]
-
-    async def _get_details(self, place_id: str) -> Dict:
-        if not place_id:
-            return {}
-        params = {"place_id": place_id, "key": self.api_key, "fields": "formatted_phone_number,website,formatted_address,name,url"}
-        try:
-            resp = await self.client.get(PLACES_DETAIL_URL, params=params)
-            resp.raise_for_status()
-            return resp.json().get("result", {})
-        except Exception as e:
-            logger.error(f"Place details failed: {e}")
-            return {}
+        return data.get("places", [])[:15]
 
     async def close(self):
         await self.client.aclose()

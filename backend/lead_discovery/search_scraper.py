@@ -1,24 +1,25 @@
 """
-Google Search Scraper - Uses SerpAPI for structured Google results.
+DuckDuckGo Search Scraper - Uses ddgs for keyless, free search results.
 Primary data source for finding real people matching discovery criteria.
 """
 
 import logging
 import re
+import asyncio
 from typing import List, Dict, Optional
 import httpx
 from bs4 import BeautifulSoup
+from ddgs import DDGS
 
 from config import settings
 from schemas.discovery import LeadContact
 
 logger = logging.getLogger(__name__)
-SERPAPI_BASE = "https://serpapi.com/search.json"
-
 
 class GoogleSearchScraper:
     def __init__(self):
-        self.api_key = settings.SERPAPI_KEY
+        # Kept the name GoogleSearchScraper to not break other imports,
+        # but under the hood we use DuckDuckGo
         self.client = httpx.AsyncClient(timeout=settings.REQUEST_TIMEOUT)
 
     async def search(self, queries: List[str], max_results: int = 50) -> List[LeadContact]:
@@ -37,43 +38,31 @@ class GoogleSearchScraper:
                         all_leads.append(lead)
             except Exception as e:
                 logger.error(f"Search failed for '{query}': {e}")
-        logger.info(f"Google Search found {len(all_leads)} leads from {len(queries)} queries")
+        logger.info(f"Search found {len(all_leads)} leads from {len(queries)} queries")
         return all_leads
 
     async def _execute_search(self, query: str, num: int = 20) -> Dict:
-        if not self.api_key:
-            return await self._fallback_search(query, num)
-        params = {"engine": "google", "q": query, "api_key": self.api_key, "num": num, "hl": "en"}
-        resp = await self.client.get(SERPAPI_BASE, params=params)
-        resp.raise_for_status()
-        return resp.json()
+        def fetch():
+            results = []
+            try:
+                with DDGS() as ddgs:
+                    ddgs_results = ddgs.text(query, max_results=num)
+                    if ddgs_results:
+                        for r in ddgs_results:
+                            results.append({
+                                "title": r.get("title", ""),
+                                "link": r.get("href", ""),
+                                "snippet": r.get("body", "")
+                            })
+            except Exception as e:
+                logger.error(f"DDGS fetch error: {e}")
+            return {"organic_results": results}
 
-    async def _fallback_search(self, query: str, num: int = 20) -> Dict:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
         try:
-            resp = await self.client.get("https://www.google.com/search", params={"q": query, "num": num}, headers=headers, follow_redirects=True)
-            if resp.status_code == 200:
-                return self._parse_html(resp.text)
+            return await asyncio.to_thread(fetch)
         except Exception as e:
-            logger.error(f"Fallback search failed: {e}")
-        return {"organic_results": []}
-
-    def _parse_html(self, html: str) -> Dict:
-        soup = BeautifulSoup(html, "lxml")
-        results = []
-        for div in soup.select("div.g, div.tF2Cxc"):
-            title_el = div.select_one("h3")
-            link_el = div.select_one("a[href]")
-            snippet_el = div.select_one("div.VwiC3b, span.aCOpRe")
-            if title_el and link_el:
-                href = link_el.get("href", "")
-                if href.startswith("/url?q="):
-                    href = href.split("/url?q=")[1].split("&")[0]
-                results.append({"title": title_el.get_text(strip=True), "link": href, "snippet": snippet_el.get_text(strip=True) if snippet_el else ""})
-        return {"organic_results": results}
+            logger.error(f"DuckDuckGo search failed: {e}")
+            return {"organic_results": []}
 
     def _extract_leads(self, results: Dict) -> List[LeadContact]:
         leads = []

@@ -32,6 +32,9 @@ async def discover_leads(request: DiscoveryRequest):
         result = await engine.discover(request)
         logger.info(f"[API] Discovery complete: {result.total_found} leads found")
         return result
+    except ValueError as ve:
+        logger.warning(f"[API] Discovery validation failed: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"[API] Discovery failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)}")
@@ -60,7 +63,11 @@ async def discovery_health():
         "status": "healthy",
         "services": {
             "groq_api": "configured" if settings.GROQ_API_KEY else "not_configured",
-            "serpapi": "configured" if settings.SERPAPI_KEY else "not_configured (using fallback)",
+            "search_engine": "duckduckgo (keyless)",
             "google_maps": "configured" if settings.GOOGLE_MAPS_API_KEY else "not_configured",
+            "apollo": "configured" if settings.APOLLO_API_KEY else "not_configured",
+            "debug_apollo_key": settings.APOLLO_API_KEY,
+            "debug_maps_key": settings.GOOGLE_MAPS_API_KEY,
+            "debug_engine_key": engine.apollo.api_key
         }
     }

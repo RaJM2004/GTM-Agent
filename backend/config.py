@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     SERPAPI_KEY: str = os.getenv("SERPAPI_KEY", "")
     GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
+    APOLLO_API_KEY: str = os.getenv("APOLLO_API_KEY", "")
     
     # Server Config
     HOST: str = os.getenv("HOST", "0.0.0.0")

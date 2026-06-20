@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Filter, Download, Plus, Bot, Sparkles, Loader2 } from 'lucide-react';
+import { Filter, Download, Plus, Bot, Sparkles, Loader2, Mail, Phone } from 'lucide-react';
 
 export default function Discovery() {
   const [query, setQuery] = useState('');
@@ -18,7 +18,10 @@ export default function Discovery() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: query, max_results: 10 }),
       });
-      if (!res.ok) throw new Error('Failed to fetch leads');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to fetch leads');
+      }
       const data = await res.json();
       setLeads(data.leads || []);
       setSearched(true);
@@ -56,6 +59,19 @@ export default function Discovery() {
           </button>
         </div>
       </div>
+
+      {/* Conversational AI Chat Bubble */}
+      {error && error.startsWith('Sir,') && (
+        <div className="flex items-start gap-4 p-5 rounded-2xl bg-[#EFF6FF] border border-[#BFDBFE] shadow-sm ml-4 mr-12">
+          <div className="bg-blue-600 p-2 rounded-full shadow-sm">
+            <Bot className="w-5 h-5 text-white" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-blue-900 mb-1">AI Assistant</h3>
+            <p className="text-blue-800 text-sm leading-relaxed">{error}</p>
+          </div>
+        </div>
+      )}
 
       {/* Filters and Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -97,9 +113,9 @@ export default function Discovery() {
                   <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary" />
                 </th>
                 <th scope="col" className="px-6 py-4">Prospect</th>
+                <th scope="col" className="px-6 py-4">Contact Info</th>
                 <th scope="col" className="px-6 py-4">Title</th>
                 <th scope="col" className="px-6 py-4">Company</th>
-                <th scope="col" className="px-6 py-4">Size</th>
                 <th scope="col" className="px-6 py-4">Location</th>
                 <th scope="col" className="px-6 py-4">Match Score</th>
               </tr>
@@ -116,9 +132,31 @@ export default function Discovery() {
                     </div>
                     {lead.name}
                   </td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col gap-1.5">
+                      {lead.email ? (
+                        <div className="flex items-center gap-2 text-sm">
+                          <Mail className="w-3.5 h-3.5 text-gray-400" />
+                          <span className="text-gray-900 font-medium truncate max-w-[200px]" title={lead.email}>
+                            {lead.email}
+                          </span>
+                        </div>
+                      ) : null}
+                      {lead.phone ? (
+                        <div className="flex items-center gap-2 text-xs">
+                          <Phone className="w-3.5 h-3.5 text-gray-400" />
+                          <span className="text-gray-500 font-mono">
+                            {lead.phone}
+                          </span>
+                        </div>
+                      ) : null}
+                      {!lead.email && !lead.phone && (
+                        <span className="text-gray-400 text-sm italic">No contact info</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-6 py-4">{lead.title}</td>
                   <td className="px-6 py-4">{lead.company}</td>
-                  <td className="px-6 py-4">{lead.company_size || 'N/A'}</td>
                   <td className="px-6 py-4">{lead.location}</td>
                   <td className="px-6 py-4">
                     <span className="bg-primary/10 text-primary border border-primary/20 px-2 py-1 rounded-md text-xs font-semibold">
@@ -128,8 +166,26 @@ export default function Discovery() {
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                    {loading ? 'Searching for leads...' : error ? <span className="text-red-500">{error}</span> : searched ? 'No leads found.' : 'Enter a prompt to discover leads.'}
+                  <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                    {loading ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                        <span className="text-gray-600 font-medium">Scraping the web for leads...</span>
+                      </div>
+                    ) : error ? (
+                      error.startsWith('Sir,') ? (
+                        <div className="flex flex-col items-center gap-2">
+                           <Bot className="w-6 h-6 text-blue-500" />
+                           <span className="text-blue-600 font-medium">Waiting for your reply...</span>
+                        </div>
+                      ) : (
+                        <span className="text-red-500">{error}</span>
+                      )
+                    ) : searched ? (
+                      'No leads found. Try broadening your search.'
+                    ) : (
+                      'Enter a prompt to discover leads.'
+                    )}
                   </td>
                 </tr>
               )}

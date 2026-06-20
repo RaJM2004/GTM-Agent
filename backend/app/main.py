@@ -46,8 +46,9 @@ def health_check():
         "status": "healthy",
         "services": {
             "groq": "configured" if settings.GROQ_API_KEY else "not_configured",
-            "serpapi": "configured" if settings.SERPAPI_KEY else "not_configured",
+            "search_engine": "duckduckgo (keyless)",
             "google_maps": "configured" if settings.GOOGLE_MAPS_API_KEY else "not_configured",
+            "apollo": "configured" if settings.APOLLO_API_KEY else "not_configured",
         }
     }
 
