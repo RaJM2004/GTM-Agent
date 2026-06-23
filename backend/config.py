@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
     APOLLO_API_KEY: str = os.getenv("APOLLO_API_KEY", "")
     MONGODB_URI: str = os.getenv("MONGODB_URI", "")
+    LINKEDIN_CLIENT_ID: str = os.getenv("LINKEDIN_CLIENT_ID", "YOUR_CLIENT_ID")
+    LINKEDIN_CLIENT_SECRET: str = os.getenv("LINKEDIN_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    HF_TOKEN: str = os.getenv("HF_TOKEN", "")
     
     # Server Config
     HOST: str = os.getenv("HOST", "0.0.0.0")

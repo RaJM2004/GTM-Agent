@@ -52,3 +52,23 @@ async def save_leads(leads: list, prompt: str):
     except Exception as e:
         logger.error(f"Failed to save leads to MongoDB: {e}")
         return False
+
+async def save_integration_token(user_id: str, platform: str, token_data: dict):
+    """Save an OAuth token for a specific user and platform."""
+    if db is None:
+        logger.warning("MongoDB is not connected. Token will not be saved.")
+        return False
+        
+    try:
+        collection = db.users
+        # Upsert the token data into the user's document under the 'integrations' field
+        await collection.update_one(
+            {"user_id": user_id},
+            {"$set": {f"integrations.{platform}": token_data}},
+            upsert=True
+        )
+        logger.info(f"Saved {platform} token for user {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save token to MongoDB: {e}")
+        return False

@@ -9,7 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from api.discovery import router as discovery_router
+from api.campaigns import router as campaigns_router
+from api.integrations import router as integrations_router
 from database import connect_to_mongo, close_mongo_connection
+from fastapi.staticfiles import StaticFiles
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -41,8 +44,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files for images
+import os
+os.makedirs("d:/Zerokost/GTM/backend", exist_ok=True)
+app.mount("/static", StaticFiles(directory="d:/Zerokost/GTM/backend"), name="static")
+
 # Include Routers
 app.include_router(discovery_router)
+app.include_router(campaigns_router)
+app.include_router(integrations_router)
 
 @app.get("/")
 def read_root():
@@ -66,3 +76,4 @@ if __name__ == "__main__":
     from config import settings
     logger.info(f"Starting GTM OS API on {settings.HOST}:{settings.PORT}")
     uvicorn.run("app.main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
+

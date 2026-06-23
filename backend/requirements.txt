@@ -11,4 +11,8 @@ aiohttp==3.10.10
 fake-useragent==1.5.1
 phonenumbers==8.13.47
 ddgs
-
+torch
+diffusers
+transformers
+accelerate
+sentencepiece
