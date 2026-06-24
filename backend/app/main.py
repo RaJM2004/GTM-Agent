@@ -38,7 +38,8 @@ app = FastAPI(
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,8 +47,9 @@ app.add_middleware(
 
 # Mount static files for images
 import os
-os.makedirs("d:/Zerokost/GTM/backend", exist_ok=True)
-app.mount("/static", StaticFiles(directory="d:/Zerokost/GTM/backend"), name="static")
+STATIC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Include Routers
 app.include_router(discovery_router)
