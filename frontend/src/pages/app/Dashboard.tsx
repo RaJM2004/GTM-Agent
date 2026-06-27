@@ -1,6 +1,35 @@
+import { useState, useEffect } from 'react';
 import { Users, CalendarCheck, Megaphone, TrendingUp, Wand2, ArrowRight } from 'lucide-react';
+import { apiFetch } from '../../utils/api';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const [stats, setStats] = useState({
+    total_leads: 0,
+    meetings_booked: 0,
+    active_campaigns: 0,
+    conversion_rate: 0
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const data = await apiFetch('/api/dashboard/stats');
+        if (data.status === 'success') {
+          setStats(data.stats);
+        }
+      } catch (error) {
+        console.error('Failed to fetch dashboard stats:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchStats();
+  }, []);
+
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
       
@@ -24,7 +53,7 @@ export default function Dashboard() {
             </div>
             
             <div className="space-y-2">
-              <h2 className="text-2xl font-medium text-stone-500">Hi Sales Leader,</h2>
+              <h2 className="text-2xl font-medium text-stone-500">Hi {user?.name || 'Sales Leader'},</h2>
               <h1 className="text-4xl sm:text-5xl font-bold text-[#5A4A42] leading-tight">
                 You have a lot to catchup <br />
                 <span className="text-primary">with...</span>
@@ -60,7 +89,9 @@ export default function Dashboard() {
               <span className="text-sm font-semibold text-gray-600">Total Leads</span>
               <Users className="w-5 h-5 text-gray-400" />
             </div>
-            <div className="text-4xl font-bold text-gray-900 mb-2">12,345</div>
+            <div className="text-4xl font-bold text-gray-900 mb-2">
+              {loading ? <span className="text-gray-300 animate-pulse">...</span> : stats.total_leads.toLocaleString()}
+            </div>
             <p className="text-xs text-gray-500">Potential prospects identified.</p>
           </div>
 
@@ -69,7 +100,9 @@ export default function Dashboard() {
               <span className="text-sm font-semibold text-gray-600">Meetings Booked</span>
               <CalendarCheck className="w-5 h-5 text-gray-400" />
             </div>
-            <div className="text-4xl font-bold text-gray-900 mb-2">142</div>
+            <div className="text-4xl font-bold text-gray-900 mb-2">
+              {loading ? <span className="text-gray-300 animate-pulse">...</span> : stats.meetings_booked.toLocaleString()}
+            </div>
             <p className="text-xs text-gray-500">Meetings scheduled this month.</p>
           </div>
 
@@ -78,7 +111,9 @@ export default function Dashboard() {
               <span className="text-sm font-semibold text-gray-600">Active Campaigns</span>
               <Megaphone className="w-5 h-5 text-gray-400" />
             </div>
-            <div className="text-4xl font-bold text-gray-900 mb-2">8</div>
+            <div className="text-4xl font-bold text-gray-900 mb-2">
+              {loading ? <span className="text-gray-300 animate-pulse">...</span> : stats.active_campaigns.toLocaleString()}
+            </div>
             <p className="text-xs text-gray-500">Ongoing outreach sequences.</p>
           </div>
 
@@ -87,7 +122,9 @@ export default function Dashboard() {
               <span className="text-sm font-semibold text-gray-600">Conversion Rate</span>
               <TrendingUp className="w-5 h-5 text-gray-400" />
             </div>
-            <div className="text-4xl font-bold text-gray-900 mb-2">3.8%</div>
+            <div className="text-4xl font-bold text-gray-900 mb-2">
+              {loading ? <span className="text-gray-300 animate-pulse">...</span> : `${stats.conversion_rate}%`}
+            </div>
             <p className="text-xs text-gray-500">from 45,231 emails sent</p>
           </div>
         </div>

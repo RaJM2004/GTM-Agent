@@ -1,8 +1,48 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Bot, Target, Zap, BarChart, Users, MessageSquare, PhoneCall, Hourglass } from 'lucide-react';
 
 export default function LandingPage() {
+  const placeholders = [
+    "Find me VP of Engineering at SaaS companies in California...",
+    "SaaS founders in New York...",
+    "CTOs who recently raised Series A...",
+    "Marketing directors using Salesforce..."
+  ];
+  
+  const [placeholderText, setPlaceholderText] = useState("");
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    const currentPhrase = placeholders[phraseIndex];
+    let timer: NodeJS.Timeout;
+    
+    if (isDeleting) {
+      if (placeholderText.length > 0) {
+        timer = setTimeout(() => {
+          setPlaceholderText(currentPhrase.substring(0, placeholderText.length - 1));
+        }, 30);
+      } else {
+        setIsDeleting(false);
+        setPhraseIndex((prev) => (prev + 1) % placeholders.length);
+      }
+    } else {
+      if (placeholderText.length < currentPhrase.length) {
+        timer = setTimeout(() => {
+          setPlaceholderText(currentPhrase.substring(0, placeholderText.length + 1));
+        }, 50);
+      } else {
+        timer = setTimeout(() => {
+          setIsDeleting(true);
+        }, 2000);
+      }
+    }
+    
+    return () => clearTimeout(timer);
+  }, [placeholderText, isDeleting, phraseIndex]);
+
   return (
     <div className="min-h-screen bg-[#FAF9F6] selection:bg-primary/20">
       {/* Navbar */}
@@ -61,7 +101,7 @@ export default function LandingPage() {
                 </div>
                 <input 
                   type="text" 
-                  placeholder="e.g. Find me VP of Engineering at SaaS companies in California..." 
+                  placeholder={placeholderText} 
                   className="flex-1 bg-transparent border-none py-5 px-2 text-lg text-gray-900 placeholder-gray-400 focus:ring-0 outline-none"
                 />
                 <Link to="/register" className="shrink-0 bg-primary hover:bg-primary/90 text-white rounded-[20px] px-6 py-4 font-medium flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98]">
