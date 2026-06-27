@@ -41,7 +41,7 @@ class GoogleSearchScraper:
         logger.info(f"Search found {len(all_leads)} leads from {len(queries)} queries")
         return all_leads
 
-    async def _execute_search(self, query: str, num: int = 20) -> Dict:
+    async def _execute_search(self, query: str, num: int = 40) -> Dict:
         def fetch():
             results = []
             try:

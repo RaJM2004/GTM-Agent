@@ -12,18 +12,12 @@ def generate_campaign_image(prompt: str, output_path: str = "poster.png"):
 
     client = InferenceClient(token=settings.HF_TOKEN)
 
-    # Add styling keywords to ensure professional marketing quality
-    enhanced_prompt = (
-        f"{prompt}, highly detailed, professional marketing photography, "
-        f"8k resolution, photorealistic, cinematic lighting, studio quality"
-    )
-
     max_retries = 5
     for attempt in range(max_retries):
         try:
             # Generate image using FLUX.1-schnell via the official HF client
             image = client.text_to_image(
-                prompt=enhanced_prompt,
+                prompt=prompt,
                 model="black-forest-labs/FLUX.1-schnell",
             )
 

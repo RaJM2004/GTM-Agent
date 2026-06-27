@@ -1,10 +1,47 @@
 import { useState } from 'react';
-import { Filter, Download, Plus, Bot, Sparkles, Loader2, Mail, Phone } from 'lucide-react';
+import { Filter, Download, Plus, Bot, Sparkles, Loader2, Mail, Phone, ShieldCheck, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+
+// Helper: extract requested count from prompt
+function extractCountFromPrompt(prompt: string): number {
+  const match = prompt.match(/(\d+)\s*(?:leads?|people|founders?|ctos?|ceos?|contacts?|professionals?|directors?|managers?)/i);
+  if (match) return Math.min(parseInt(match[1], 10), 200);
+  // Also check for "find <number>"
+  const findMatch = prompt.match(/find\s+(\d+)/i);
+  if (findMatch) return Math.min(parseInt(findMatch[1], 10), 200);
+  return 50;
+}
+
+// ICP Score badge component
+function IcpBadge({ score, reasoning }: { score: number | null; reasoning?: string }) {
+  if (score === null || score === undefined) {
+    return <span className="text-gray-400 text-xs italic">Not scored</span>;
+  }
+  const pct = Math.round(score);
+  let color = 'bg-red-100 text-red-700 border-red-200';
+  let Icon = XCircle;
+  let label = 'Poor';
+  if (pct >= 80) { color = 'bg-emerald-100 text-emerald-700 border-emerald-200'; Icon = CheckCircle2; label = 'Excellent'; }
+  else if (pct >= 60) { color = 'bg-blue-100 text-blue-700 border-blue-200'; Icon = ShieldCheck; label = 'Good'; }
+  else if (pct >= 40) { color = 'bg-amber-100 text-amber-700 border-amber-200'; Icon = AlertTriangle; label = 'Fair'; }
+
+  return (
+    <div className="flex flex-col items-center gap-1" title={reasoning || ''}>
+      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border ${color}`}>
+        <Icon className="w-3.5 h-3.5" />
+        {pct}%
+      </span>
+      <span className={`text-[10px] font-medium ${color.includes('emerald') ? 'text-emerald-600' : color.includes('blue') ? 'text-blue-600' : color.includes('amber') ? 'text-amber-600' : 'text-red-600'}`}>{label}</span>
+    </div>
+  );
+}
 
 export default function Discovery() {
+  const { user } = useAuth();
   const [query, setQuery] = useState('');
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [scoring, setScoring] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
 
@@ -12,11 +49,13 @@ export default function Discovery() {
     if (!query) return;
     setLoading(true);
     setError('');
+    const requestedCount = extractCountFromPrompt(query);
     try {
+      const currentUserId = user?.user_id || 'user_12345_john_doe';
       const res = await fetch('http://localhost:8000/api/discovery/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: query, max_results: 10 }),
+        body: JSON.stringify({ prompt: query, max_results: requestedCount, user_id: currentUserId }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -29,6 +68,33 @@ export default function Discovery() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleScoreICP = async () => {
+    if (leads.length === 0) return;
+    setScoring(true);
+    try {
+      const res = await fetch('http://localhost:8000/api/discovery/score-icp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leads, original_query: query }),
+      });
+      if (!res.ok) throw new Error('ICP scoring failed');
+      const data = await res.json();
+      // Merge scores back into leads
+      const scoredLeads = leads.map((lead, idx) => ({
+        ...lead,
+        icp_score: data.scores?.[idx]?.score ?? null,
+        icp_reasoning: data.scores?.[idx]?.reasoning ?? '',
+      }));
+      // Sort by ICP score descending
+      scoredLeads.sort((a: any, b: any) => (b.icp_score ?? 0) - (a.icp_score ?? 0));
+      setLeads(scoredLeads);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setScoring(false);
     }
   };
 
@@ -47,7 +113,8 @@ export default function Discovery() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder='e.g. "Find 100 AI founders with 50+ employees in India"'
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            placeholder='e.g. "Find 50 AI founders with 50+ employees in Hyderabad"'
             className="w-full bg-transparent border-none py-4 pl-12 pr-32 text-gray-900 placeholder-gray-400 focus:ring-0 text-lg outline-none"
           />
           <button 
@@ -94,12 +161,42 @@ export default function Discovery() {
         </div>
 
         <div className="flex gap-2">
-          <button className="flex items-center px-4 py-2 bg-white border border-[#F2DED6] text-gray-700 text-sm rounded-lg hover:bg-gray-50 transition-colors shadow-sm">
+          {leads.length > 0 && (
+            <button
+              onClick={handleScoreICP}
+              disabled={scoring}
+              className="flex items-center px-4 py-2 bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 text-white text-sm rounded-lg transition-all shadow-sm font-medium disabled:opacity-50">
+              {scoring ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
+              {scoring ? 'Scoring...' : 'Score ICP'}
+            </button>
+          )}
+          <button 
+            onClick={() => {
+              if (leads.length === 0) return;
+              const headers = ['Name','Title','Company','Email','Phone','LinkedIn','Website','Location','Industry','Confidence'];
+              const rows = leads.map((l: any) => [l.name,l.title,l.company,l.email,l.phone,l.linkedin_url||'',l.website||'',l.location,l.industry||'',l.confidence||''].map(v => `"${(v||'').toString().replace(/"/g,'""')}"`).join(','));
+              const csv = [headers.join(','), ...rows].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `discovery_leads_${new Date().toISOString().slice(0,10)}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            disabled={leads.length === 0}
+            className="flex items-center px-4 py-2 bg-white border border-[#F2DED6] text-gray-700 text-sm rounded-lg hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-50"
+          >
             <Download className="w-4 h-4 mr-2" /> Export CSV
           </button>
-          <button className="flex items-center px-4 py-2 bg-primary/10 text-primary border border-primary/20 text-sm rounded-lg hover:bg-primary/20 transition-colors">
-            <Plus className="w-4 h-4 mr-2" /> Add to Campaign
-          </button>
+          <a 
+            href="/app/leads"
+            className="flex items-center px-4 py-2 bg-primary/10 text-primary border border-primary/20 text-sm rounded-lg hover:bg-primary/20 transition-colors"
+          >
+            <Plus className="w-4 h-4 mr-2" /> View in Lead Manager
+          </a>
         </div>
       </div>
 
@@ -117,7 +214,8 @@ export default function Discovery() {
                 <th scope="col" className="px-6 py-4">Title</th>
                 <th scope="col" className="px-6 py-4">Company</th>
                 <th scope="col" className="px-6 py-4">Location</th>
-                <th scope="col" className="px-6 py-4">Match Score</th>
+                <th scope="col" className="px-6 py-4">ICP Score</th>
+                <th scope="col" className="px-6 py-4">Data Quality</th>
               </tr>
             </thead>
             <tbody>
@@ -158,6 +256,9 @@ export default function Discovery() {
                   <td className="px-6 py-4">{lead.title}</td>
                   <td className="px-6 py-4">{lead.company}</td>
                   <td className="px-6 py-4">{lead.location}</td>
+                  <td className="px-6 py-4">
+                    <IcpBadge score={lead.icp_score ?? null} reasoning={lead.icp_reasoning} />
+                  </td>
                   <td className="px-6 py-4">
                     <span className="bg-primary/10 text-primary border border-primary/20 px-2 py-1 rounded-md text-xs font-semibold">
                       {lead.confidence ? `${Math.round(lead.confidence * 100)}%` : 'N/A'}

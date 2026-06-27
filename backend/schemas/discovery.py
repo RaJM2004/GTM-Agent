@@ -16,6 +16,7 @@ class DiscoveryRequest(BaseModel):
         examples=["Find 50 founders of AI companies with 5+ years of experience in Hyderabad"]
     )
     max_results: int = Field(default=50, ge=1, le=200, description="Maximum number of leads to return")
+    user_id: str = Field(default="", description="The ID of the user requesting discovery")
 
 
 class ParsedQuery(BaseModel):

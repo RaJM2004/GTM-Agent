@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
 class ContentRequest(BaseModel):
-    action: str # "post" or "dm"
+    channel: str # linkedin, email, whatsapp, voice, sms
+    objective: str # follow_up, engagement, product_launch, event_management
+    action: str # post, dm
     product_name: str
     target_customer: str
     call_to_action: str
@@ -42,65 +44,105 @@ class DraftRequest(BaseModel):
     user_id: str
     name: str
 
+class EmailSendRequest(BaseModel):
+    campaign_id: str
+    user_id: str
+    subject: str
+    content: str
+    method: str
+    leads: list[dict] = []
+
+class EmailPublishRequest(BaseModel):
+    action: str
+    content: str
+    user_id: str
+    name: str
+    method: str
+    leads: list[dict] = []
+
 def get_groq_client():
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
     return AsyncGroq(api_key=settings.GROQ_API_KEY)
 
-@router.post("/linkedin/generate-content", response_model=ContentResponse)
-async def generate_linkedin_content(req: ContentRequest):
+@router.post("/generate-content", response_model=ContentResponse)
+async def generate_campaign_content(req: ContentRequest):
     client = get_groq_client()
     model = "llama-3.3-70b-versatile"
     
-    if req.action == "post":
-        prompt = f"""Create an engaging, professional LinkedIn post with the following details:
-- Product/Service: {req.product_name}
-- Target Audience: {req.target_customer}
-- Key Information/Details: {req.product_info}
-- Goal/Call to Action: {req.call_to_action}
-
-Make it sound authentic, include appropriate emojis, use spacing for readability, and include 3-5 relevant hashtags at the end."""
-    else:
-        prompt = f"""Create a professional, highly personalized LinkedIn direct message (DM) to a prospect with the following details:
-- Product/Service: {req.product_name}
-- Target Audience Persona: {req.target_customer}
-- Value Proposition/Details: {req.product_info}
-- Goal/Call to Action: {req.call_to_action}
-
-Keep it concise, friendly, and focused on starting a conversation without being overly salesy. Do not include subject lines, just the message body."""
-        
+    from prompts.campaign_prompts import fill_prompt
+    import json
+    
     try:
+        # Use the user's new helper function
+        prompt = fill_prompt(
+            channel=req.channel.lower(),
+            campaign_type=req.objective.lower(),
+            product_name=req.product_name,
+            target_customer=req.target_customer,
+            product_info=req.product_info,
+            call_to_action=req.call_to_action
+        )
+        
+        # The prompt demands JSON, so we enforce it
         response = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
+            temperature=0.7,
+            response_format={"type": "json_object"}
         )
-        content = response.choices[0].message.content.strip()
-        return ContentResponse(content=content)
+        
+        raw_content = response.choices[0].message.content.strip()
+        
+        # Extract the 'message' from the JSON object to display in the frontend
+        try:
+            parsed_json = json.loads(raw_content)
+            content_to_display = parsed_json.get("message", raw_content)
+        except json.JSONDecodeError:
+            content_to_display = raw_content
+            
+        return ContentResponse(content=content_to_display)
     except Exception as e:
-        logger.error(f"Failed to generate content: {e}")
+        logger.error(f"Failed to generate content: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/linkedin/generate-image", response_model=ImageResponse)
 async def generate_linkedin_image(req: ImageRequest):
     client = get_groq_client()
     model = "llama-3.3-70b-versatile"
+    import json
+    from prompts.campaign_prompts import get_image_prompt
     
-    # Generate image prompt
-    prompt = f"Based on this LinkedIn post content, generate a short, highly descriptive image generation prompt (max 20 words) suitable for an AI image generator. The image should be a photorealistic, high-quality, professional marketing photograph. Avoid cartoons or illustrations:\n\n{req.content}"
+    # Generate image prompt using the new structured prompts
+    # Since this endpoint is currently hardcoded for linkedin, we'll pass 'linkedin' and a generic campaign_type for now.
+    # We can default to 'engagement' as the safest bet if the frontend doesn't send the campaign_type in ImageRequest.
+    prompt = get_image_prompt(
+        channel="linkedin", 
+        campaign_type="engagement", 
+        campaign_content=req.content
+    )
     
     try:
         response = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
+            temperature=0.7,
+            response_format={"type": "json_object"}
         )
-        image_prompt = response.choices[0].message.content.strip()
+        raw_content = response.choices[0].message.content.strip()
+        
+        # Parse the JSON and extract the image_prompt (<=20 words)
+        try:
+            parsed = json.loads(raw_content)
+            image_prompt = parsed.get("image_prompt", raw_content)
+        except json.JSONDecodeError:
+            image_prompt = raw_content
         
         # Output path
         import time
+        import os
         output_filename = f"poster_{int(time.time())}.png"
-        output_path = f"d:/Zerokost/GTM/backend/{output_filename}"
+        output_path = os.path.abspath(output_filename)
         
         # Generate image using diffusers
         generate_campaign_image(image_prompt, output_path)
@@ -117,7 +159,7 @@ async def upload_linkedin_image(file: UploadFile = File(...)):
     
     ext = file.filename.split('.')[-1] if '.' in file.filename else 'png'
     output_filename = f"poster_upload_{int(time.time())}.{ext}"
-    output_path = f"d:/Zerokost/GTM/backend/{output_filename}"
+    output_path = os.path.abspath(output_filename)
     
     try:
         content = await file.read()
@@ -162,7 +204,7 @@ async def publish_linkedin_campaign(req: PublishRequest):
         if req.image_url:
             # Extract local filename from the URL (e.g., /static/poster_123.png)
             filename = req.image_url.split("/")[-1]
-            local_image_path = f"d:/Zerokost/GTM/backend/{filename}"
+            local_image_path = os.path.abspath(filename)
             
             if os.path.exists(local_image_path):
                 # Step A: Register the upload
@@ -250,7 +292,10 @@ async def publish_linkedin_campaign(req: PublishRequest):
             "replied": 0,
             "booked": 0,
             "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
-            "created_at": datetime.datetime.utcnow()
+            "created_at": datetime.datetime.utcnow(),
+            "content": req.content,
+            "image_url": req.image_url,
+            "action": req.action
         }
         await db.campaigns.insert_one(new_campaign)
 
@@ -297,3 +342,160 @@ async def save_linkedin_draft(req: DraftRequest):
     
     await db.campaigns.insert_one(new_draft)
     return {"status": "success", "message": "Campaign successfully saved as a draft!"}
+
+async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str, method: str) -> int:
+    from database import db
+    from services.email_sender import send_email_via_gmail_api, send_email_via_smtp
+    
+    user = await db.users.find_one({"user_id": user_id})
+    logger.info(f"Dispatching emails for user {user_id}. Initial method: {method}. Leads count: {len(leads)}")
+    if not user or "integrations" not in user:
+        logger.warning(f"User {user_id} not found or has no integrations.")
+        raise ValueError("No email integrations connected. Please go to Integrations and connect an email account.")
+        
+    creds = user["integrations"].get(method.lower())
+    if not creds:
+        # Fallback to any available email provider
+        for p in ["gmail", "outlook", "smtp"]:
+            if p in user["integrations"]:
+                creds = user["integrations"][p]
+                method = p
+                logger.info(f"Fell back to email provider: {p}")
+                break
+                
+    if not creds:
+        logger.warning(f"No email credentials found for user {user_id}.")
+        raise ValueError("No valid email provider connected. Please go to Integrations and connect your email.")
+        
+    logger.info(f"Proceeding with email provider {method} for {len(leads)} leads.")
+    successful_sends = 0
+    import re
+    import time
+    from services.email_fetcher import refresh_gmail_token
+    
+    # Pre-refresh Gmail token if needed
+    if method.lower() == "gmail" and creds.get("auth_type") == "oauth":
+        if time.time() >= creds.get("expires_at", 0) - 60:
+            refresh_token = creds.get("refresh_token")
+            if refresh_token:
+                try:
+                    refreshed = await refresh_gmail_token(refresh_token)
+                    creds["access_token"] = refreshed["access_token"]
+                    creds["expires_at"] = time.time() + refreshed["expires_in"]
+                    
+                    await db.users.update_one(
+                        {"user_id": user_id},
+                        {"$set": {
+                            "integrations.gmail.access_token": creds["access_token"],
+                            "integrations.gmail.expires_at": creds["expires_at"]
+                        }}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to refresh gmail token in dispatcher: {e}")
+
+    for lead in leads:
+        lead_email = lead.get("email")
+        if not lead_email:
+            continue
+            
+        lead_name = lead.get("name") or "there"
+        personalized_content = content
+        
+        # Replace common placeholders with the lead's name
+        patterns = [r"\{\{name\}\}", r"\[name\]", r"\[client name\]", r"\[first name\]", r"<name>", r"\{\{first_name\}\}", r"\[recipient name\]"]
+        for p in patterns:
+            personalized_content = re.sub(p, lead_name, personalized_content, flags=re.IGNORECASE)
+        
+        if method.lower() == "gmail":
+            success = await send_email_via_gmail_api(
+                access_token=creds.get("access_token"),
+                to=lead_email,
+                subject=subject,
+                body=personalized_content
+            )
+        else:
+            success = await send_email_via_smtp(
+                email=creds.get("email"),
+                password=creds.get("password"),
+                host=creds.get("host", "smtp.gmail.com"),
+                port=int(creds.get("port", 587) if creds.get("port") else 587),
+                to=lead_email,
+                subject=subject,
+                body=personalized_content
+            )
+            
+        if success:
+            successful_sends += 1
+            
+    return successful_sends
+
+@router.post("/email/send")
+async def send_email_campaign(req: EmailSendRequest):
+    logger.info(f"Sending email campaign '{req.subject}' to {len(req.leads)} leads via {req.method}.")
+    
+    try:
+        successful_sends = await _dispatch_emails(
+            user_id=req.user_id,
+            leads=req.leads,
+            subject=req.subject,
+            content=req.content,
+            method=req.method
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+    
+    from database import db
+    from bson.objectid import ObjectId
+    if db is not None:
+        try:
+            await db.campaigns.update_one(
+                {"_id": ObjectId(req.campaign_id)},
+                {"$inc": {"sent": successful_sends}, "$set": {"status": "Active"}}
+            )
+        except Exception as e:
+            logger.error(f"Failed to update campaign sent count: {e}")
+
+    return {
+        "status": "success", 
+        "message": f"Successfully sent email campaign to {successful_sends} out of {len(req.leads)} contacts!"
+    }
+
+@router.post("/email/publish")
+async def publish_email_campaign(req: EmailPublishRequest):
+    from database import db
+    import datetime
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    logger.info(f"Publishing email campaign '{req.name}' to {len(req.leads)} leads via {req.method}.")
+    
+    try:
+        successful_sends = await _dispatch_emails(
+            user_id=req.user_id,
+            leads=req.leads,
+            subject=req.name,
+            content=req.content,
+            method=req.method
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+    
+    new_campaign = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Active",
+        "type": "Email",
+        "progress": 100,
+        "sent": successful_sends,
+        "replied": 0,
+        "booked": 0,
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "content": req.content,
+        "action": req.action
+    }
+    
+    await db.campaigns.insert_one(new_campaign)
+    
+    return {"status": "success", "message": f"Successfully published and sent email campaign to {successful_sends} contacts!"}

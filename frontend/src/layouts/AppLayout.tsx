@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { 
   LayoutDashboard, 
   Search, 
@@ -15,7 +16,8 @@ import {
   LogOut,
   Menu,
   Hourglass,
-  User as UserIcon
+  User as UserIcon,
+  Contact
 } from 'lucide-react';
 
 const navigation = [
@@ -23,6 +25,7 @@ const navigation = [
   { name: 'Inbox', href: '/app/inbox', icon: Inbox },
   { name: 'Lead Discovery', href: '/app/discovery', icon: Search },
   { name: 'Lead Management', href: '/app/leads', icon: Users },
+  { name: 'Contacts', href: '/app/contacts', icon: Contact },
   { name: 'Campaigns', href: '/app/campaigns', icon: Megaphone },
   { name: 'Templates', href: '/app/templates', icon: FileText },
   { name: 'Calls', href: '/app/calls', icon: Phone },
@@ -34,6 +37,8 @@ const navigation = [
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [time, setTime] = useState('');
 
   useEffect(() => {
@@ -75,9 +80,14 @@ export default function AppLayout() {
           <div className="hidden md:flex items-center gap-2 text-gray-600 font-mono">
             {time}
           </div>
-          <div className="flex items-center gap-2 bg-primary/10 px-3 py-1.5 rounded-full text-primary font-semibold cursor-pointer hover:bg-primary/20 transition-colors">
-            <UserIcon className="w-4 h-4" />
-            Sales Leader
+          <div className="flex items-center gap-2.5 bg-primary/10 px-3.5 py-1.5 rounded-full text-primary font-semibold cursor-pointer hover:bg-primary/20 transition-all border border-primary/20" title={`Logged in via: ${user?.auth_provider || 'email'}`}>
+            <UserIcon className="w-4 h-4 shrink-0" />
+            <span className="max-w-[130px] truncate">{user?.name || 'Sales Leader'}</span>
+            {user?.role && (
+              <span className="text-[9px] bg-primary text-white px-2 py-0.5 rounded-md uppercase font-bold tracking-wider font-sans shrink-0">
+                {user.role}
+              </span>
+            )}
           </div>
         </div>
       </header>
@@ -127,13 +137,16 @@ export default function AppLayout() {
                 <Settings className={`w-5 h-5 mr-3 ${location.pathname.includes('/settings') ? 'text-primary' : 'text-gray-500'}`} />
                 Settings
               </Link>
-              <Link
-                to="/"
-                className="flex items-center px-6 py-3 text-sm font-medium theme-inactive-item hover:bg-[#F2DED6] transition-colors"
+              <button
+                onClick={async () => {
+                  await logout();
+                  navigate('/login');
+                }}
+                className="w-full flex items-center px-6 py-3 text-sm font-medium theme-inactive-item hover:bg-[#F2DED6] transition-colors text-left"
               >
-                <LogOut className="w-5 h-5 mr-3 text-gray-500" />
+                <LogOut className="w-5 h-5 mr-3 text-gray-500 shrink-0" />
                 Logout
-              </Link>
+              </button>
             </div>
           </nav>
         </div>

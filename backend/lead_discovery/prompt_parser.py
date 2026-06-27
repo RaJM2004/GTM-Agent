@@ -34,25 +34,32 @@ Extract the following fields and return ONLY a valid JSON object (no markdown, n
   "count": <integer, number of leads requested, default 50>,
   "keywords": ["additional", "relevant", "search", "keywords"],
   "search_queries": [
-    "Generate 5-8 diverse Google search queries that would help find REAL people matching this criteria. Each query should use different search operators and angles. Include site:linkedin.com queries, company directory queries, conference speaker queries, and general web queries. Make them specific to the location and industry.",
+    "Generate 10-15 diverse search queries to find REAL people matching this criteria. Use different search operators and target different data sources: LinkedIn, Crunchbase, Wellfound, company team pages, awards, conferences, news articles.",
     "example: site:linkedin.com/in/ \\"AI\\" \\"founder\\" \\"Hyderabad\\"",
     "example: \\"AI startup\\" \\"founder\\" \\"Hyderabad\\" email contact",
     "example: \\"artificial intelligence\\" company founder Hyderabad CEO",
     "example: AI startup Hyderabad founder site:crunchbase.com",
     "example: \\"machine learning\\" \\"deep learning\\" startup founder Hyderabad India",
     "example: AI companies Hyderabad founders directors list",
-    "example: \\"AI\\" \\"co-founder\\" OR \\"founder\\" Hyderabad contact email"
+    "example: \\"AI\\" \\"co-founder\\" OR \\"founder\\" Hyderabad contact email phone",
+    "example: top AI startups Hyderabad 2024 founders team",
+    "example: site:wellfound.com AI Hyderabad founder",
+    "example: \\"AI company\\" \\"about us\\" \\"our team\\" Hyderabad",
+    "example: AI managing director OR CEO Hyderabad India contact"
   ]
 }}
 
 IMPORTANT:
+- Generate at least 10 different, highly diverse search queries
 - The search_queries MUST be optimized to find REAL people with real contact information
-- Include queries targeting LinkedIn, Crunchbase, AngelList, company about pages, conference speaker bios
+- Include queries targeting LinkedIn, Crunchbase, AngelList/Wellfound, company about pages, conference speaker bios, awards pages
 - Make queries diverse - don't repeat the same pattern
 - Include the location in most queries
 - Use OR operators and quotation marks for precision
-- Generate at least 6 different search queries
+- Include queries for company team pages and about us pages
+- Include queries for industry awards, accelerator programs, and conference speakers
 """
+
 
 
 class PromptParser:

@@ -28,7 +28,7 @@ def close_mongo_connection():
         client.close()
         logger.info("MongoDB connection closed")
 
-async def save_leads(leads: list, prompt: str):
+async def save_leads(leads: list, prompt: str, user_id: str = ""):
     """Save discovered leads to MongoDB"""
     if db is None:
         logger.warning("MongoDB is not connected. Leads will not be saved.")
@@ -42,6 +42,7 @@ async def save_leads(leads: list, prompt: str):
         for lead in leads:
             lead_dict = lead.dict()
             lead_dict["discovery_prompt"] = prompt
+            lead_dict["user_id"] = user_id
             docs.append(lead_dict)
             
         if docs:

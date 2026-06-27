@@ -16,3 +16,8 @@ diffusers
 transformers
 accelerate
 sentencepiece
+python-multipart
+motor
+bcrypt==4.2.0
+pyjwt==2.10.1
+email-validator==2.3.0

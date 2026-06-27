@@ -11,6 +11,9 @@ from contextlib import asynccontextmanager
 from api.discovery import router as discovery_router
 from api.campaigns import router as campaigns_router
 from api.integrations import router as integrations_router
+from api.leads import router as leads_router
+from api.contacts import router as contacts_router
+from api.auth import router as auth_router
 from database import connect_to_mongo, close_mongo_connection
 from fastapi.staticfiles import StaticFiles
 
@@ -52,9 +55,12 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Include Routers
+app.include_router(auth_router)
 app.include_router(discovery_router)
 app.include_router(campaigns_router)
 app.include_router(integrations_router)
+app.include_router(leads_router)
+app.include_router(contacts_router)
 
 @app.get("/")
 def read_root():
