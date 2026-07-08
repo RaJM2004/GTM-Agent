@@ -60,6 +60,19 @@ class EmailPublishRequest(BaseModel):
     method: str
     leads: list[dict] = []
 
+class SmsSendRequest(BaseModel):
+    campaign_id: str
+    user_id: str
+    content: str
+    leads: list[dict] = []
+
+class SmsPublishRequest(BaseModel):
+    action: str
+    content: str
+    user_id: str
+    name: str
+    leads: list[dict] = []
+
 def get_groq_client():
     if not settings.GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
@@ -521,3 +534,126 @@ async def publish_email_campaign(req: EmailPublishRequest):
     await db.campaigns.insert_one(new_campaign)
     
     return {"status": "success", "message": f"Successfully published and sent email campaign to {successful_sends} contacts!"}
+
+async def _dispatch_sms(user_id: str, leads: list, content: str) -> int:
+    from database import db
+    from services.sms_sender import send_sms_via_twilio
+    
+    user = await db.users.find_one({"user_id": user_id})
+    logger.info(f"Dispatching SMS for user {user_id}. Leads count: {len(leads)}")
+    if not user or "integrations" not in user or "twilio" not in user["integrations"]:
+        logger.warning(f"User {user_id} not found or Twilio not connected.")
+        raise ValueError("Twilio account is not connected. Please go to Integrations and connect your Twilio account.")
+        
+    creds = user["integrations"]["twilio"]
+    account_sid = creds.get("account_sid")
+    auth_token = creds.get("auth_token")
+    from_number = creds.get("from_number")
+    
+    if not account_sid or not auth_token or not from_number:
+        raise ValueError("Incomplete Twilio credentials. Please check your Integrations.")
+        
+    successful_sends = 0
+    from services.billing import check_and_deduct_credits
+    await check_and_deduct_credits(user_id, "sms_sent", amount=1, dry_run=True)
+    
+    for lead in leads:
+        lead_phone = lead.get("phone")
+        if not lead_phone:
+            continue
+            
+        # Basic personalization replacement if needed (can be extended to AI)
+        lead_name = lead.get("name", "there")
+        personalized_content = content.replace("[Name]", lead_name).replace("{Name}", lead_name)
+        
+        success = await send_sms_via_twilio(
+            account_sid=account_sid,
+            auth_token=auth_token,
+            from_number=from_number,
+            to=lead_phone,
+            body=personalized_content
+        )
+            
+        if success:
+            successful_sends += 1
+            await check_and_deduct_credits(user_id, "sms_sent", amount=1, dry_run=False)
+            
+            # Mark the lead as SMSed
+            if db is not None:
+                try:
+                    await db.leads.update_many(
+                        {"phone": lead_phone, "user_id": user_id},
+                        {"$set": {"sms_sent_via_gtm": True}}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update sms_sent_via_gtm for {lead_phone}: {e}")
+            
+    return successful_sends
+
+@router.post("/sms/send")
+async def send_sms_campaign(req: SmsSendRequest):
+    logger.info(f"Sending SMS campaign to {len(req.leads)} leads.")
+    
+    try:
+        successful_sends = await _dispatch_sms(
+            user_id=req.user_id,
+            leads=req.leads,
+            content=req.content
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+    
+    from database import db
+    from bson.objectid import ObjectId
+    if db is not None:
+        try:
+            await db.campaigns.update_one(
+                {"_id": ObjectId(req.campaign_id)},
+                {"$inc": {"sent": successful_sends}, "$set": {"status": "Active"}}
+            )
+        except Exception as e:
+            logger.error(f"Failed to update campaign sent count: {e}")
+
+    return {
+        "status": "success", 
+        "message": f"Successfully sent SMS campaign to {successful_sends} out of {len(req.leads)} contacts!"
+    }
+
+@router.post("/sms/publish")
+async def publish_sms_campaign(req: SmsPublishRequest):
+    from database import db
+    import datetime
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    logger.info(f"Publishing SMS campaign '{req.name}' to {len(req.leads)} leads.")
+    
+    try:
+        successful_sends = await _dispatch_sms(
+            user_id=req.user_id,
+            leads=req.leads,
+            content=req.content
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+    
+    new_campaign = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Active",
+        "type": "SMS",
+        "progress": 100,
+        "sent": successful_sends,
+        "replied": 0,
+        "booked": 0,
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "content": req.content,
+        "action": req.action
+    }
+    
+    await db.campaigns.insert_one(new_campaign)
+    
+    return {"status": "success", "message": f"Successfully published and sent SMS campaign to {successful_sends} contacts!"}
+

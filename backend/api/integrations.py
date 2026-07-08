@@ -215,6 +215,28 @@ async def connect_email(req: EmailConnectRequest):
     return {"status": "success", "message": f"{req.provider} connected successfully"}
 
 
+class TwilioConnectRequest(BaseModel):
+    user_id: str
+    account_sid: str
+    auth_token: str
+    from_number: str
+
+@router.post("/twilio/connect")
+async def connect_twilio(req: TwilioConnectRequest):
+    """Saves Twilio credentials to the user's integrations."""
+    await save_integration_token(
+        user_id=req.user_id,
+        platform="twilio",
+        token_data={
+            "account_sid": req.account_sid,
+            "auth_token": req.auth_token,
+            "from_number": req.from_number
+        }
+    )
+    return {"status": "success", "message": "Twilio connected successfully"}
+
+
+
 async def _process_incoming_emails(emails: list, user_id: str):
     from database import db
     from services.sentiment import classify_email_sentiment

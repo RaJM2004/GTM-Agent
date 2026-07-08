@@ -24,7 +24,7 @@ high-converting, channel-native campaign messages that feel human, not automated
    - LinkedIn → Professional, thought-leader, conversational authority
    - Email → Direct, value-first, clear CTA, subject line optimized for open rates
    - WhatsApp → Casual, warm, brief, like a message from a trusted contact
-   - SMS → Ultra-concise, punchy, ≤160 characters, action-oriented
+   - SMS → Ultra-concise, punchy, ≤320 characters, action-oriented
    - Voice → Spoken-word natural, energetic, pause-friendly, no jargon
 5. **One clear CTA per message.** Never include more than one call to action.
 6. **Conversion psychology baked in.** Use: social proof cues, urgency (when 
@@ -411,7 +411,7 @@ channel — every character counts.
 - Context: {product_info}
 
 ## WRITING INSTRUCTIONS
-- HARD LIMIT: 160 characters (including spaces and link)
+- HARD LIMIT: 320 characters (including spaces and link)
 - Reference the previous touchpoint in ≤5 words
 - State the value or reason to respond in plain language
 - End with the CTA — either a link or a reply prompt
@@ -435,7 +435,7 @@ to take a small action.
 - Context: {product_info}
 
 ## WRITING INSTRUCTIONS
-- HARD LIMIT: 160 characters
+- HARD LIMIT: 320 characters
 - Open with an insight or question that immediately relates to {product_info} context
 - One frictionless action: reply Y, tap a link, or answer a one-word question
 - Conversational, not promotional
@@ -458,7 +458,7 @@ minimum characters.
 - Context: {product_info}
 
 ## WRITING INSTRUCTIONS
-- HARD LIMIT: 160 characters
+- HARD LIMIT: 320 characters
 - Lead with the launch: "[Product] is live" or "Just launched: [Product]"
 - One benefit in 5–7 words
 - Link on same line or immediately after
@@ -482,7 +482,7 @@ someone registers or shows up.
 - Context: {product_info}
 
 ## WRITING INSTRUCTIONS
-- HARD LIMIT: 160 characters
+- HARD LIMIT: 320 characters
 - Format: "[Event] | [Date] [Time] | [Link]" — clarity above all
 - Add one urgency word: "Today", "Tomorrow", "Last chance", "Starts in 1hr"
 - Link must be on its own or clearly separated by a pipe or dash

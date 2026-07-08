@@ -22,6 +22,8 @@ export default function Integrations() {
   const [integrations, setIntegrations] = useState(initialIntegrations);
   const [showEmailModal, setShowEmailModal] = useState<string | null>(null);
   const [emailForm, setEmailForm] = useState({ host: '', port: '', email: '', password: '' });
+  const [showTwilioModal, setShowTwilioModal] = useState(false);
+  const [twilioForm, setTwilioForm] = useState({ account_sid: '', auth_token: '', from_number: '' });
   const [isConnecting, setIsConnecting] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -88,6 +90,11 @@ export default function Integrations() {
       return;
     }
 
+    if (id === 'twilio') {
+      setShowTwilioModal(true);
+      return;
+    }
+
     // Mock connection for others
     setIntegrations(integrations.map(int => 
       int.id === id ? { ...int, status: 'connected' } : int
@@ -122,6 +129,34 @@ export default function Integrations() {
     }
     setIsConnecting(false);
   };
+
+  const submitTwilioConnect = async () => {
+    setIsConnecting(true);
+    try {
+      const res = await fetch('http://localhost:8000/api/integrations/twilio/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.user_id || 'user_12345_john_doe',
+          ...twilioForm
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIntegrations(integrations.map(int => int.id === 'twilio' ? { ...int, status: 'connected' } : int));
+        setShowTwilioModal(false);
+        setTwilioForm({ account_sid: '', auth_token: '', from_number: '' });
+        alert(`Successfully connected Twilio! You can now send SMS Campaigns.`);
+      } else {
+        alert(data.detail || 'Failed to connect');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error connecting Twilio');
+    }
+    setIsConnecting(false);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -242,6 +277,35 @@ export default function Integrations() {
           </div>
         </div>
       )}
+
+      {showTwilioModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold mb-4">Connect Twilio</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Account SID</label>
+                <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.account_sid} onChange={e => setTwilioForm({...twilioForm, account_sid: e.target.value})} placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Auth Token</label>
+                <input type="password" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.auth_token} onChange={e => setTwilioForm({...twilioForm, auth_token: e.target.value})} placeholder="your_auth_token" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">From Phone Number</label>
+                <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.from_number} onChange={e => setTwilioForm({...twilioForm, from_number: e.target.value})} placeholder="+1234567890" />
+                <p className="text-xs text-gray-500 mt-2">Enter your Twilio phone number in E.164 format (e.g., +1234567890).</p>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3 justify-end">
+              <button onClick={() => setShowTwilioModal(false)} className="px-4 py-2 border border-[#F2DED6] hover:bg-gray-50 rounded-lg text-gray-600 font-medium transition-colors">Cancel</button>
+              <button onClick={submitTwilioConnect} disabled={isConnecting || !twilioForm.account_sid || !twilioForm.auth_token || !twilioForm.from_number} className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg flex items-center gap-2 font-medium disabled:opacity-50 transition-colors">
+                 {isConnecting ? 'Connecting...' : 'Connect Account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Configuration Modal */}
       {showConfigModal && (
@@ -265,16 +329,39 @@ export default function Integrations() {
                   <div>
                     <p className="text-sm font-medium text-gray-900">Connected Account</p>
                     <p className="text-sm text-gray-500 font-mono mt-1 truncate max-w-[200px]">
-                      {user?.integrations?.[showConfigModal]?.email || 'Connected via OAuth'}
+                      {user?.integrations?.[showConfigModal]?.email || user?.integrations?.[showConfigModal]?.from_number || 'Connected via OAuth'}
                     </p>
                   </div>
                   <span className="flex items-center text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-200">
                     <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Active
                   </span>
                 </div>
+                {showConfigModal === 'twilio' && (
+                  <div className="p-4 bg-[#FAF9F6] border border-[#F2DED6] rounded-xl text-sm text-gray-700 space-y-2 font-mono">
+                    <p><span className="font-semibold">Account SID:</span> {user?.integrations?.twilio?.account_sid}</p>
+                    <p><span className="font-semibold">Auth Token:</span> ••••••••</p>
+                  </div>
+                )}
               </div>
               
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                {showConfigModal === 'twilio' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTwilioForm({
+                        account_sid: user?.integrations?.twilio?.account_sid || '',
+                        auth_token: user?.integrations?.twilio?.auth_token || '',
+                        from_number: user?.integrations?.twilio?.from_number || ''
+                      });
+                      setShowConfigModal(null);
+                      setShowTwilioModal(true);
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors mr-auto"
+                  >
+                    Edit Credentials
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowConfigModal(null)}

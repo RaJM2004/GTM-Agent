@@ -30,6 +30,9 @@ export default function Dashboard() {
     };
     
     fetchStats();
+    // Realtime analytics update every 5 seconds
+    const interval = setInterval(fetchStats, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -137,9 +140,10 @@ export default function Dashboard() {
         <h2 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
           Token Usage
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {[
             { label: "Emails Sent", key: "emails_sent", color: "bg-primary" },
+            { label: "SMS Sent", key: "sms_sent", color: "bg-orange-500" },
             { label: "AI Leads", key: "ai_leads_discovered", color: "bg-blue-500" },
             { label: "AI Personas", key: "ai_personalizations", color: "bg-purple-500" },
             { label: "LinkedIn Posts", key: "linkedin_posts", color: "bg-emerald-500" }

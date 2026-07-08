@@ -30,6 +30,7 @@ export default function Billing() {
 
   const usageStats = [
     { label: "Emails Sent", key: "emails_sent", color: "bg-primary" },
+    { label: "SMS Sent", key: "sms_sent", color: "bg-orange-500" },
     { label: "AI Leads Discovered", key: "ai_leads_discovered", color: "bg-blue-500" },
     { label: "AI Personalizations", key: "ai_personalizations", color: "bg-purple-500" },
     { label: "LinkedIn Posts", key: "linkedin_posts", color: "bg-emerald-500" }

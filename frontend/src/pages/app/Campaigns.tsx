@@ -82,7 +82,7 @@ export default function Campaigns() {
   }, [viewingCampaign]);
 
   useEffect(() => {
-    if (showCreateModal && campaignType === 'email') {
+    if (showCreateModal && (campaignType === 'email' || campaignType === 'sms')) {
       fetchLeads();
     }
   }, [showCreateModal, campaignType]);
@@ -272,7 +272,7 @@ export default function Campaigns() {
   const handlePublish = async () => {
     setIsPublishing(true);
     try {
-      if (campaignType === 'email') {
+      if (['email', 'sms'].includes(campaignType)) {
         let collectedLeads: any[] = [];
         if (audienceMethod === 'leads') {
           industryGroups.forEach(g => {
@@ -286,16 +286,20 @@ export default function Campaigns() {
           });
         }
         
-        const res = await fetch('http://localhost:8000/api/campaigns/email/publish', {
+        const endpoint = campaignType === 'email' 
+          ? 'http://localhost:8000/api/campaigns/email/publish' 
+          : 'http://localhost:8000/api/campaigns/sms/publish';
+
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             action, 
             content: generatedContent, 
             user_id: user?.user_id || "user_12345_john_doe",
-            name: productName || "Email Campaign",
+            name: productName || `${campaignType.toUpperCase()} Campaign`,
             method: audienceMethod,
-            leads: collectedLeads.map(l => ({ name: l.name, email: l.email }))
+            leads: collectedLeads.map(l => ({ name: l.name, email: l.email, phone: l.phone }))
           })
         });
         const data = await res.json();
@@ -719,7 +723,7 @@ export default function Campaigns() {
                         </div>
                       )}
 
-                      {campaignType === 'email' && (
+                      {['email', 'sms'].includes(campaignType) && (
                         <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
                           <h3 className="text-sm font-semibold text-gray-900 mb-3">Select Audience</h3>
                           <div className="flex gap-4 mb-4">
