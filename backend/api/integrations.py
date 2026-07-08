@@ -215,6 +215,40 @@ async def connect_email(req: EmailConnectRequest):
     return {"status": "success", "message": f"{req.provider} connected successfully"}
 
 
+async def _process_incoming_emails(emails: list, user_id: str):
+    from database import db
+    from services.sentiment import classify_email_sentiment
+    
+    if db is None or not emails:
+        return emails
+        
+    for email in emails:
+        sender_email = email.get("sender_email")
+        if not sender_email:
+            continue
+            
+        # Check if sender is a lead for this user
+        lead = await db.leads.find_one({"email": {"$regex": f"^{sender_email}$", "$options": "i"}})
+        if not lead:
+            continue
+            
+        # If the lead has no reply_status yet, classify the email
+        reply_status = lead.get("reply_status")
+        if not reply_status:
+            logger.info(f"Classifying email from known lead: {sender_email}")
+            reply_status = await classify_email_sentiment(email.get("body", ""))
+            
+            # Update the lead in DB
+            await db.leads.update_one(
+                {"_id": lead["_id"]},
+                {"$set": {"reply_status": reply_status}}
+            )
+            
+        # Attach the status to the email object for the frontend
+        email["lead_status"] = reply_status
+        
+    return emails
+
 @router.get("/email/messages")
 async def get_email_messages(folder: str = "inbox", current_user: dict = Depends(get_current_user)):
     """Fetch real-time emails for the logged-in user if they have an email integration."""
@@ -268,6 +302,9 @@ async def get_email_messages(folder: str = "inbox", current_user: dict = Depends
                         logger.info("Successfully saved refreshed Google Workspace OAuth credentials to MongoDB.")
             
             emails = await fetch_emails_via_gmail_api(access_token, folder=folder)
+            if folder == "inbox":
+                emails = await _process_incoming_emails(emails, current_user["user_id"])
+                
             return {
                 "success": True,
                 "connected": True,
@@ -291,6 +328,9 @@ async def get_email_messages(folder: str = "inbox", current_user: dict = Depends
             host=email_creds.get("host", ""),
             folder=folder
         )
+        if folder == "inbox":
+            emails = await _process_incoming_emails(emails, current_user["user_id"])
+            
         return {
             "success": True,
             "connected": True,

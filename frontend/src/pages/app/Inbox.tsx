@@ -223,19 +223,26 @@ export default function Inbox() {
                     {selectedThread?.id === thread.id && (
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-r-full"></div>
                     )}
-                    <div className="flex justify-between items-start mb-1">
-                      <div className="flex items-center gap-2">
-                        <span className="p-1.5 rounded-md bg-blue-50 text-blue-500">
-                          <Mail className="w-3.5 h-3.5" />
-                        </span>
-                        <span className={`font-semibold text-sm truncate max-w-[150px] ${thread.unread ? 'text-gray-900' : 'text-gray-700'}`}>
-                          {thread.name}
+                      <div className="flex justify-between items-start mb-1">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="p-1.5 rounded-md bg-blue-50 text-blue-500">
+                              <Mail className="w-3.5 h-3.5" />
+                            </span>
+                            <span className={`font-semibold text-sm truncate max-w-[150px] ${thread.unread ? 'text-gray-900' : 'text-gray-700'}`}>
+                              {thread.name}
+                            </span>
+                          </div>
+                          {thread.lead_status && (
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full self-start ${thread.lead_status === 'Positive' ? 'bg-green-100 text-green-700' : thread.lead_status === 'Negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
+                              {thread.lead_status} Lead
+                            </span>
+                          )}
+                        </div>
+                        <span className={`text-[10px] shrink-0 ${thread.unread ? 'text-primary font-bold' : 'text-gray-400'}`}>
+                          {thread.time}
                         </span>
                       </div>
-                      <span className={`text-[10px] shrink-0 ${thread.unread ? 'text-primary font-bold' : 'text-gray-400'}`}>
-                        {thread.time}
-                      </span>
-                    </div>
                     <div className="pl-8">
                       <p className="text-xs font-semibold text-gray-900 mb-0.5 truncate">{thread.subject}</p>
                       <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{thread.preview}</p>
@@ -257,7 +264,14 @@ export default function Inbox() {
                       {selectedThread.name.charAt(0)}
                     </div>
                     <div>
-                      <h2 className="text-xl font-bold text-gray-900 mb-1">{selectedThread.name}</h2>
+                      <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center gap-2">
+                        {selectedThread.name}
+                        {selectedThread.lead_status && (
+                          <span className={`text-xs font-bold px-2 py-1 rounded-full ${selectedThread.lead_status === 'Positive' ? 'bg-green-100 text-green-700' : selectedThread.lead_status === 'Negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
+                            {selectedThread.lead_status} Lead
+                          </span>
+                        )}
+                      </h2>
                       <div className="flex items-center gap-3 text-sm text-gray-500">
                         <span className="font-medium text-gray-700">{selectedThread.company}</span>
                         <span className="w-1 h-1 rounded-full bg-gray-300"></span>

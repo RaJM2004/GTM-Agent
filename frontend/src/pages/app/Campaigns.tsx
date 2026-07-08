@@ -43,6 +43,7 @@ export default function Campaigns() {
   const [audienceMethod, setAudienceMethod] = useState<'leads' | 'upload'>('leads');
   const [selectedLeadEmails, setSelectedLeadEmails] = useState<Set<string>>(new Set());
   const [expandedIndustries, setExpandedIndustries] = useState<Set<string>>(new Set());
+  const [onlyVerifiedEmails, setOnlyVerifiedEmails] = useState(false);
 
   const fetchCampaigns = async () => {
     try {
@@ -167,7 +168,9 @@ export default function Campaigns() {
         industryGroups.forEach(g => {
           g.leads.forEach((l: any) => {
             if (selectedLeadEmails.has(l.email)) {
-              collectedLeads.push(l);
+              if (!onlyVerifiedEmails || l.is_verified) {
+                collectedLeads.push(l);
+              }
             }
           });
         });
@@ -275,7 +278,9 @@ export default function Campaigns() {
           industryGroups.forEach(g => {
             (g.leads || []).forEach((l: any) => {
               if (selectedLeadEmails.has(l.email)) {
-                collectedLeads.push(l);
+                if (!onlyVerifiedEmails || l.is_verified) {
+                  collectedLeads.push(l);
+                }
               }
             });
           });
@@ -742,6 +747,20 @@ export default function Campaigns() {
                             </label>
                           </div>
 
+                          {audienceMethod === 'leads' && (
+                            <div className="mb-3">
+                              <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2 rounded border border-emerald-200">
+                                <input 
+                                  type="checkbox" 
+                                  checked={onlyVerifiedEmails}
+                                  onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
+                                  className="text-emerald-600 focus:ring-emerald-500 rounded"
+                                />
+                                <span className="text-sm font-medium text-emerald-800">Only send to Verified Emails</span>
+                              </label>
+                            </div>
+                          )}
+
                           {audienceMethod === 'leads' ? (
                             <div className="space-y-2 max-h-40 overflow-y-auto bg-white p-2 border border-gray-200 rounded">
                               {industryGroups.length === 0 ? (
@@ -770,18 +789,22 @@ export default function Campaigns() {
                                     {expandedIndustries.has(group.industry) && (
                                       <div className="bg-gray-50 p-1.5 border-t border-gray-200 pl-6 max-h-32 overflow-y-auto">
                                         { (group.leads || []).map((lead: any, i: number) => (
-                                          <label key={i} className="flex items-center p-1 hover:bg-white rounded cursor-pointer transition-colors">
-                                            <input 
-                                              type="checkbox"
-                                              checked={selectedLeadEmails.has(lead.email)}
-                                              onChange={() => toggleLeadSelection(lead.email)}
-                                              className="w-3 h-3 text-primary focus:ring-primary rounded border-gray-300"
-                                            />
-                                            <div className="flex flex-col ml-2">
-                                              <span className="text-xs font-medium text-gray-800">{lead.name}</span>
-                                              <span className="text-[10px] text-gray-500">{lead.email}</span>
-                                            </div>
-                                          </label>
+                                            <label key={i} className={`flex items-center p-1 hover:bg-white rounded transition-colors ${onlyVerifiedEmails && !lead.is_verified ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                              <input 
+                                                type="checkbox"
+                                                checked={selectedLeadEmails.has(lead.email)}
+                                                onChange={() => { if (!onlyVerifiedEmails || lead.is_verified) toggleLeadSelection(lead.email) }}
+                                                disabled={onlyVerifiedEmails && !lead.is_verified}
+                                                className="w-3 h-3 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
+                                              />
+                                              <div className="flex flex-col ml-2">
+                                                <span className="text-xs font-medium text-gray-800 flex items-center gap-1">
+                                                  {lead.name}
+                                                  {lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded leading-none">✓ Verified</span>}
+                                                </span>
+                                                <span className="text-[10px] text-gray-500">{lead.email}</span>
+                                              </div>
+                                            </label>
                                         ))}
                                       </div>
                                     )}
@@ -894,6 +917,20 @@ export default function Campaigns() {
                     </label>
                   </div>
 
+                  {audienceMethod === 'leads' && (
+                    <div className="mb-4">
+                      <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
+                        <input 
+                          type="checkbox" 
+                          checked={onlyVerifiedEmails}
+                          onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
+                          className="text-emerald-600 focus:ring-emerald-500 rounded"
+                        />
+                        <span className="text-sm font-medium text-emerald-800">Only send to Verified Emails</span>
+                      </label>
+                    </div>
+                  )}
+
                   {audienceMethod === 'leads' ? (
                     <div className="space-y-3 bg-gray-50 p-4 rounded-lg border border-gray-200 max-h-60 overflow-y-auto">
                       <p className="text-sm text-gray-600 mb-2">Select industries to send to:</p>
@@ -923,15 +960,19 @@ export default function Campaigns() {
                             {expandedIndustries.has(group.industry) && (
                               <div className="bg-gray-50 p-2 border-t border-gray-200 pl-8 max-h-40 overflow-y-auto">
                                 { (group.leads || []).map((lead: any, i: number) => (
-                                  <label key={i} className="flex items-center p-1.5 hover:bg-white rounded cursor-pointer transition-colors">
+                                  <label key={i} className={`flex items-center p-1.5 hover:bg-white rounded transition-colors ${onlyVerifiedEmails && !lead.is_verified ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
                                     <input 
                                       type="checkbox"
                                       checked={selectedLeadEmails.has(lead.email)}
-                                      onChange={() => toggleLeadSelection(lead.email)}
-                                      className="w-3.5 h-3.5 text-primary focus:ring-primary rounded border-gray-300"
+                                      onChange={() => { if (!onlyVerifiedEmails || lead.is_verified) toggleLeadSelection(lead.email) }}
+                                      disabled={onlyVerifiedEmails && !lead.is_verified}
+                                      className="w-3.5 h-3.5 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
                                     />
                                     <div className="flex flex-col ml-3">
-                                      <span className="text-sm font-medium text-gray-800">{lead.name}</span>
+                                      <span className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                                        {lead.name}
+                                        {lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded leading-none">✓ Verified</span>}
+                                      </span>
                                       <span className="text-xs text-gray-500">{lead.email}</span>
                                     </div>
                                   </label>

@@ -147,7 +147,7 @@ class EmailFinder:
             logger.error(f"[Reacher] Unexpected error verifying {email}: {e}")
             return False
 
-    async def get_verified_email(self, name: str, domain: str) -> Optional[str]:
+    async def get_verified_email(self, name: str, domain: str) -> tuple[Optional[str], bool]:
         """
         Generate all possible email permutations for a person, verify each one
         against the local Reacher instance in parallel, and return the first that
@@ -161,11 +161,11 @@ class EmailFinder:
             domain: Company domain (e.g., "acmecorp.com")
 
         Returns:
-            The best verified email, or None if domain/name is missing.
+            A tuple of (email, is_verified).
         """
         candidates = self.generate_possible_emails(name, domain)
         if not candidates:
-            return None
+            return None, False
 
         logger.info(f"[EmailFinder] Verifying {len(candidates)} email permutations for '{name}' @ '{domain}'")
 
@@ -176,12 +176,12 @@ class EmailFinder:
         for email, result in zip(candidates, results):
             if result is True:
                 logger.info(f"[EmailFinder] ✓ Verified email found: {email}")
-                return email
+                return email, True
 
         # Reacher unavailable or no email passed — fall back to best heuristic guess
         logger.info(f"[EmailFinder] No email verified by Reacher, falling back to best-scored guess for {name}.")
         best_email = max(candidates, key=self.score_email, default=None)
-        return best_email
+        return best_email, False
 
     async def close(self):
         await self.client.aclose()

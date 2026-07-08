@@ -58,6 +58,10 @@ async def discover_leads(request: DiscoveryRequest):
     Example prompt: "Find 50 founders of AI companies with 5+ years of experience in Hyderabad"
     """
     try:
+        from services.billing import check_and_deduct_credits
+        # Check if they have at least 1 credit before spending time on discovery
+        await check_and_deduct_credits(request.user_id, "ai_leads_discovered", amount=1, dry_run=True)
+        
         logger.info(f"[API] Discovery request: {request.prompt}")
         result = await engine.discover(request)
         
@@ -65,6 +69,10 @@ async def discover_leads(request: DiscoveryRequest):
         from database import save_leads
         await save_leads(result.leads, request.prompt, request.user_id)
         
+        # Deduct the exact number of leads found
+        if result.leads:
+            await check_and_deduct_credits(request.user_id, "ai_leads_discovered", amount=len(result.leads))
+            
         logger.info(f"[API] Discovery complete: {result.total_found} leads found")
         return result
     except ValueError as ve:

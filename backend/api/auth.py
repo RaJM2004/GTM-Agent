@@ -106,6 +106,10 @@ async def register(user_data: UserRegister, response: Response):
         "company": user_data.company,
         "role": "user", # default role
         "auth_provider": "local",
+        "billing_plan": "Pro",
+        "credits_used": {"emails_sent": 0, "ai_leads_discovered": 0, "linkedin_posts": 0, "ai_personalizations": 0},
+        "credits_limit": {"emails_sent": 5000, "ai_leads_discovered": 1000, "linkedin_posts": 100, "ai_personalizations": 5000},
+        "billing_cycle_reset": datetime.now(timezone.utc) + timedelta(days=30),
         "created_at": datetime.now(timezone.utc)
     }
     
@@ -221,6 +225,10 @@ async def google_login(google_req: GoogleLoginRequest, response: Response):
             "role": "user", # default role
             "auth_provider": "google",
             "google_sub": google_sub,
+            "billing_plan": "Pro",
+            "credits_used": {"emails_sent": 0, "ai_leads_discovered": 0, "linkedin_posts": 0, "ai_personalizations": 0},
+            "credits_limit": {"emails_sent": 5000, "ai_leads_discovered": 1000, "linkedin_posts": 100, "ai_personalizations": 5000},
+            "billing_cycle_reset": datetime.now(timezone.utc) + timedelta(days=30),
             "created_at": datetime.now(timezone.utc)
         }
         await db.users.insert_one(user)
@@ -250,11 +258,35 @@ async def google_login(google_req: GoogleLoginRequest, response: Response):
     
     return TokenResponse(
         success=True,
-        message="Google login successful",
+        message="Google Login successful",
         access_token=access_token,
         refresh_token=refresh_token,
         user=format_user_doc(user)
     )
+
+
+@router.get("/billing")
+async def get_billing_info(current_user: dict = Depends(get_current_user)):
+    """
+    Returns the billing plan, usage, limits, and reset date for the logged-in user.
+    """
+    from database import db
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database connection is not available"
+        )
+        
+    user = await db.users.find_one({"user_id": current_user["user_id"]})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    return {
+        "billing_plan": user.get("billing_plan", "Free"),
+        "credits_used": user.get("credits_used", {}),
+        "credits_limit": user.get("credits_limit", {}),
+        "billing_cycle_reset": user.get("billing_cycle_reset")
+    }
 
 
 @router.post("/refresh", response_model=TokenResponse)

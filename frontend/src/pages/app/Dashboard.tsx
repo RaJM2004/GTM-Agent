@@ -9,7 +9,9 @@ export default function Dashboard() {
     total_leads: 0,
     meetings_booked: 0,
     active_campaigns: 0,
-    conversion_rate: 0
+    conversion_rate: 0,
+    billing: {} as Record<string, number>,
+    billing_limit: {} as Record<string, number>
   });
   const [loading, setLoading] = useState(true);
 
@@ -127,6 +129,39 @@ export default function Dashboard() {
             </div>
             <p className="text-xs text-gray-500">from 45,231 emails sent</p>
           </div>
+        </div>
+      </div>
+
+      {/* Credit Usage Section */}
+      <div>
+        <h2 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+          Token Usage
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { label: "Emails Sent", key: "emails_sent", color: "bg-primary" },
+            { label: "AI Leads", key: "ai_leads_discovered", color: "bg-blue-500" },
+            { label: "AI Personas", key: "ai_personalizations", color: "bg-purple-500" },
+            { label: "LinkedIn Posts", key: "linkedin_posts", color: "bg-emerald-500" }
+          ].map(stat => {
+            const used = stats.billing?.[stat.key] || 0;
+            const limit = stats.billing_limit?.[stat.key] || 0;
+            const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+            
+            return (
+              <div key={stat.key} className="bg-white rounded-2xl p-6 border border-[#F2DED6] shadow-sm premium-card-hover">
+                <div className="flex justify-between items-start mb-4">
+                  <span className="text-sm font-semibold text-gray-600">{stat.label}</span>
+                </div>
+                <div className="text-2xl font-bold text-gray-900 mb-4">
+                  {loading ? <span className="text-gray-300 animate-pulse">...</span> : `${used} / ${limit}`}
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-2">
+                  <div className={`${stat.color} h-2 rounded-full`} style={{ width: `${pct}%` }}></div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

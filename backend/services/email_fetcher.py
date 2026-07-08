@@ -145,6 +145,7 @@ async def fetch_real_emails(email_address: str, password: str, host: str = "", f
                 email_list.append({
                     "id": idx + 1,
                     "name": sender_name or sender_email or "External Sender",
+                    "sender_email": sender_email,
                     "company": sender_email.split("@")[-1].split(".")[0].title() if sender_email else "External",
                     "subject": subject,
                     "preview": preview or "(Empty body)",
@@ -300,6 +301,7 @@ async def fetch_emails_via_gmail_api(access_token: str, folder: str = "inbox") -
                 email_list.append({
                     "id": idx + 1,
                     "name": sender_name or sender_email or "External Sender",
+                    "sender_email": sender_email,
                     "company": sender_email.split("@")[-1].split(".")[0].title() if sender_email else "External",
                     "subject": subject,
                     "preview": preview or msg_data.get("snippet", "") or "(Empty body)",

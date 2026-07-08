@@ -1,6 +1,40 @@
-import { CreditCard, CheckCircle2, FileText, Zap } from 'lucide-react';
+import { CreditCard, CheckCircle2, FileText, Zap, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { apiFetch } from '../../utils/api';
 
 export default function Billing() {
+  const [billingData, setBillingData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchBilling = async () => {
+      try {
+        const data = await apiFetch('/api/v1/auth/billing');
+        setBillingData(data);
+      } catch (err) {
+        console.error("Failed to load billing data", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchBilling();
+  }, []);
+
+  if (loading) {
+    return <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
+
+  const { billing_plan, credits_used, credits_limit, billing_cycle_reset } = billingData || {};
+  
+  const resetDate = billing_cycle_reset ? new Date(billing_cycle_reset).toLocaleDateString() : 'Next Month';
+
+  const usageStats = [
+    { label: "Emails Sent", key: "emails_sent", color: "bg-primary" },
+    { label: "AI Leads Discovered", key: "ai_leads_discovered", color: "bg-blue-500" },
+    { label: "AI Personalizations", key: "ai_personalizations", color: "bg-purple-500" },
+    { label: "LinkedIn Posts", key: "linkedin_posts", color: "bg-emerald-500" }
+  ];
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <div>
@@ -12,11 +46,11 @@ export default function Billing() {
         <div className="p-6 border-b border-[#F2DED6] bg-[#FDF8F5]">
           <div className="flex justify-between items-center">
             <div>
-              <h2 className="text-lg font-bold text-gray-900">Current Plan: Pro</h2>
-              <p className="text-sm text-gray-500 mt-1">You are currently on the Pro plan. Next billing date is Nov 1, 2026.</p>
+              <h2 className="text-lg font-bold text-gray-900">Current Plan: {billing_plan}</h2>
+              <p className="text-sm text-gray-500 mt-1">You are currently on the {billing_plan} plan. Next billing cycle resets on {resetDate}.</p>
             </div>
             <div className="text-right">
-              <span className="text-3xl font-bold text-gray-900">$299</span>
+              <span className="text-3xl font-bold text-gray-900">₹24,999</span>
               <span className="text-gray-500">/mo</span>
             </div>
           </div>
@@ -49,26 +83,24 @@ export default function Billing() {
         </div>
 
         <div className="bg-white rounded-xl p-6 border border-[#F2DED6] shadow-sm">
-          <h3 className="font-semibold text-gray-900 mb-6">Usage this month</h3>
+          <h3 className="font-semibold text-gray-900 mb-6">Live Usage this month</h3>
           <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">Emails Sent</span>
-                <span className="font-medium text-gray-900">45k / 50k</span>
-              </div>
-              <div className="w-full bg-gray-100 rounded-full h-2">
-                <div className="bg-primary h-2 rounded-full" style={{ width: '90%' }}></div>
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-600">AI Call Minutes</span>
-                <span className="font-medium text-gray-900">850 / 1000</span>
-              </div>
-              <div className="w-full bg-gray-100 rounded-full h-2">
-                <div className="bg-blue-500 h-2 rounded-full" style={{ width: '85%' }}></div>
-              </div>
-            </div>
+            {usageStats.map(stat => {
+              const used = credits_used?.[stat.key] || 0;
+              const limit = credits_limit?.[stat.key] || 0;
+              const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+              return (
+                <div key={stat.key}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-gray-600">{stat.label}</span>
+                    <span className="font-medium text-gray-900">{used} / {limit}</span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-2">
+                    <div className={`${stat.color} h-2 rounded-full`} style={{ width: `${pct}%` }}></div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -79,15 +111,15 @@ export default function Billing() {
         </div>
         <div className="divide-y divide-[#F2DED6]">
           {[
-            { date: 'Oct 1, 2026', amount: '$299.00', status: 'Paid' },
-            { date: 'Sep 1, 2026', amount: '$299.00', status: 'Paid' },
-            { date: 'Aug 1, 2026', amount: '$299.00', status: 'Paid' },
+            { date: 'Oct 1, 2026', amount: '₹24,999.00', status: 'Paid' },
+            { date: 'Sep 1, 2026', amount: '₹24,999.00', status: 'Paid' },
+            { date: 'Aug 1, 2026', amount: '₹24,999.00', status: 'Paid' },
           ].map((invoice, i) => (
             <div key={i} className="p-4 flex justify-between items-center hover:bg-gray-50 transition-colors">
               <div className="flex items-center gap-4">
                 <FileText className="w-5 h-5 text-gray-400" />
                 <div>
-                  <p className="font-medium text-gray-900">Pro Plan - Monthly</p>
+                  <p className="font-medium text-gray-900">{billing_plan} Plan - Monthly</p>
                   <p className="text-xs text-gray-500">{invoice.date}</p>
                 </div>
               </div>

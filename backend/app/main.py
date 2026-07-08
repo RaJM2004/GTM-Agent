@@ -18,10 +18,19 @@ from api.dashboard import router as dashboard_router
 from database import connect_to_mongo, close_mongo_connection
 from fastapi.staticfiles import StaticFiles
 
+from services.background_poller import background_email_poller
+import asyncio
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     connect_to_mongo()
+    
+    # Start the background email polling task
+    polling_task = asyncio.create_task(background_email_poller())
+    
     yield
+    
+    polling_task.cancel()
     close_mongo_connection()
 
 # Configure logging

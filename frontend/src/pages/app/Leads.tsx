@@ -17,6 +17,8 @@ interface Lead {
   source: string;
   discovery_prompt: string;
   company_size: string;
+  is_verified: boolean;
+  reply_status?: string;
 }
 
 interface IndustryGroup {
@@ -55,6 +57,7 @@ export default function Leads() {
   const [expandedIndustries, setExpandedIndustries] = useState<Set<string>>(new Set());
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [replyFilter, setReplyFilter] = useState<'All' | 'Positive' | 'Negative' | 'Neutral'>('All');
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -150,10 +153,16 @@ export default function Leads() {
     });
   };
 
-  // Filter leads based on search
+  // Filter leads based on search and reply status
   const filteredGroups = industryGroups.map(group => ({
     ...group,
     leads: group.leads.filter(lead => {
+      if (replyFilter !== 'All') {
+        if (replyFilter === 'Positive' && lead.reply_status !== 'Positive') return false;
+        if (replyFilter === 'Negative' && lead.reply_status !== 'Negative') return false;
+        if (replyFilter === 'Neutral' && lead.reply_status !== 'Neutral') return false;
+      }
+      
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
       return (
@@ -201,6 +210,23 @@ export default function Leads() {
             </button>
           )}
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-4 border-b border-[#F2DED6]">
+        {['All', 'Positive', 'Negative', 'Neutral'].map(tab => (
+          <button
+            key={tab}
+            onClick={() => setReplyFilter(tab as any)}
+            className={`px-2 py-3 text-sm font-semibold border-b-2 transition-colors ${
+              replyFilter === tab 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {tab} {tab !== 'All' ? 'Replies' : 'Leads'}
+          </button>
+        ))}
       </div>
 
       {/* Search & Stats Row */}
@@ -339,6 +365,7 @@ export default function Leads() {
                           <th scope="col" className="px-5 py-3">Company</th>
                           <th scope="col" className="px-5 py-3">Location</th>
                           <th scope="col" className="px-5 py-3">Quality</th>
+                          <th scope="col" className="px-5 py-3">Reply Status</th>
                           <th scope="col" className="px-5 py-3">Source</th>
                         </tr>
                       </thead>
@@ -374,11 +401,16 @@ export default function Leads() {
                               <td className="px-5 py-3">
                                 <div className="flex flex-col gap-1">
                                   {lead.email && (
-                                    <div className="flex items-center gap-1.5 text-xs">
+                                    <div className="flex items-center gap-1.5 text-xs flex-wrap">
                                       <Mail className="w-3 h-3 text-gray-400 shrink-0" />
-                                      <a href={`mailto:${lead.email}`} className="text-gray-700 hover:text-primary truncate max-w-[180px]" title={lead.email}>
+                                      <a href={`mailto:${lead.email}`} className="text-gray-700 hover:text-primary truncate max-w-[150px]" title={lead.email}>
                                         {lead.email}
                                       </a>
+                                      {lead.is_verified && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 ml-1 whitespace-nowrap">
+                                          ✓ Verified
+                                        </span>
+                                      )}
                                     </div>
                                   )}
                                   {lead.phone && (
@@ -427,6 +459,19 @@ export default function Leads() {
                                   </div>
                                   <span className="text-xs font-medium text-gray-600">{Math.round(lead.confidence * 100)}%</span>
                                 </div>
+                              </td>
+                              <td className="px-5 py-3">
+                                {lead.reply_status ? (
+                                  <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                                    lead.reply_status === 'Positive' ? 'bg-green-100 text-green-700' :
+                                    lead.reply_status === 'Negative' ? 'bg-red-100 text-red-700' :
+                                    'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {lead.reply_status}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-gray-400">—</span>
+                                )}
                               </td>
                               <td className="px-5 py-3">
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${

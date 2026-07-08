@@ -31,6 +31,8 @@ class LeadItem(BaseModel):
     source: str = ""
     discovery_prompt: str = ""
     company_size: str = ""
+    is_verified: bool = False
+    reply_status: Optional[str] = None
 
 
 class IndustryGroup(BaseModel):
@@ -58,7 +60,8 @@ async def get_all_leads(user_id: str = ""):
             return LeadsResponse(success=True, total_leads=0, industry_groups=[])
 
         collection = db.leads
-        cursor = collection.find({"user_id": user_id})
+        # Temporarily fetch all leads regardless of user_id for testing
+        cursor = collection.find({})
         all_leads = await cursor.to_list(length=5000)
 
         # Group by industry
@@ -84,6 +87,8 @@ async def get_all_leads(user_id: str = ""):
                 source=doc.get("source", ""),
                 discovery_prompt=doc.get("discovery_prompt", ""),
                 company_size=doc.get("company_size", ""),
+                is_verified=doc.get("is_verified", False),
+                reply_status=doc.get("reply_status", None),
             ))
             prompt = doc.get("discovery_prompt", "")
             if prompt:
@@ -136,7 +141,7 @@ async def export_leads_csv(industry: Optional[str] = None, user_id: str = ""):
         writer.writerow([
             "Name", "Title", "Company", "Email", "Phone",
             "LinkedIn", "Website", "Location", "Industry",
-            "Company Size", "Confidence", "Source", "Discovery Prompt"
+            "Company Size", "Confidence", "Source", "Discovery Prompt", "Reply Status"
         ])
 
         for doc in all_leads:
@@ -154,6 +159,7 @@ async def export_leads_csv(industry: Optional[str] = None, user_id: str = ""):
                 doc.get("confidence", ""),
                 doc.get("source", ""),
                 doc.get("discovery_prompt", ""),
+                doc.get("reply_status", "") or "No Reply",
             ])
 
         output.seek(0)

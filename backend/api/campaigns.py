@@ -179,6 +179,9 @@ async def publish_linkedin_campaign(req: PublishRequest):
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
         
+    from services.billing import check_and_deduct_credits
+    await check_and_deduct_credits(req.user_id, "linkedin_posts", amount=1, dry_run=False)
+        
     # 1. Fetch the user's LinkedIn Token from MongoDB
     user = await db.users.find_one({"user_id": req.user_id})
     if not user or "integrations" not in user or "linkedin" not in user["integrations"]:
@@ -372,6 +375,10 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
     import re
     import time
     from services.email_fetcher import refresh_gmail_token
+    from services.billing import check_and_deduct_credits
+    
+    # Pre-flight check: Make sure they have at least 1 email token
+    await check_and_deduct_credits(user_id, "emails_sent", amount=1, dry_run=True)
     
     # Pre-refresh Gmail token if needed
     if method.lower() == "gmail" and creds.get("auth_type") == "oauth":
@@ -401,10 +408,14 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
         lead_name = lead.get("name") or "there"
         personalized_content = content
         
-        # Replace common placeholders with the lead's name
-        patterns = [r"\{\{name\}\}", r"\[name\]", r"\[client name\]", r"\[first name\]", r"<name>", r"\{\{first_name\}\}", r"\[recipient name\]"]
-        for p in patterns:
-            personalized_content = re.sub(p, lead_name, personalized_content, flags=re.IGNORECASE)
+        from services.personalization import personalize_email_content
+        from services.billing import check_and_deduct_credits
+        
+        sender_name = user.get("name", "Sales Team")
+        
+        # Use AI to perfectly craft the email for this specific lead
+        personalized_content = await personalize_email_content(content, lead, sender_name)
+        await check_and_deduct_credits(user_id, "ai_personalizations", amount=1, dry_run=False)
         
         if method.lower() == "gmail":
             success = await send_email_via_gmail_api(
@@ -426,6 +437,17 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
             
         if success:
             successful_sends += 1
+            await check_and_deduct_credits(user_id, "emails_sent", amount=1, dry_run=False)
+            
+            # Mark the lead as emailed in the database so we can track their replies later
+            if db is not None:
+                try:
+                    await db.leads.update_many(
+                        {"email": lead_email, "user_id": user_id},
+                        {"$set": {"emailed_via_gtm": True}}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update emailed_via_gtm for {lead_email}: {e}")
             
     return successful_sends
 

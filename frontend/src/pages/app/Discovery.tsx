@@ -235,9 +235,14 @@ export default function Discovery() {
                       {lead.email ? (
                         <div className="flex items-center gap-2 text-sm">
                           <Mail className="w-3.5 h-3.5 text-gray-400" />
-                          <span className="text-gray-900 font-medium truncate max-w-[200px]" title={lead.email}>
+                          <span className="text-gray-900 font-medium truncate max-w-[150px]" title={lead.email}>
                             {lead.email}
                           </span>
+                          {lead.is_verified && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 ml-1 whitespace-nowrap">
+                              ✓ Verified
+                            </span>
+                          )}
                         </div>
                       ) : null}
                       {lead.phone ? (

@@ -179,6 +179,7 @@ class DiscoveryEngine:
                     if email:
                         lead.email = email
                         lead.confidence = 0.95
+                        lead.is_verified = True
                     if phone and not lead.phone:
                         lead.phone = phone
 
@@ -217,17 +218,52 @@ class DiscoveryEngine:
                                     best_score = score
                                     best_email = email
                             lead.email = best_email
-                        
-                        # If still no email, try pattern matching with Reacher verification
-                        if not lead.email and lead.name and domain:
-                            verified = await self.email_finder.get_verified_email(lead.name, domain)
-                            if verified:
-                                lead.email = verified
-                                lead.confidence = min(lead.confidence, 0.5)
-                        
+                            
                         # Assign phone if lead doesn't have one
                         if not lead.phone and phones:
                             lead.phone = phones[0]
+
+        # 2.5 Run Reacher Verification for any lead that still needs it
+        logger.info("[Discovery] Running Reacher verification for leads")
+        reacher_tasks = []
+        for lead in leads:
+            if not getattr(lead, 'is_verified', False):
+                domain = ""
+                if lead.website:
+                    domain = self.email_finder.extract_domain_from_url(lead.website)
+                elif lead.company:
+                    domain = lead.company.lower().replace(" ", "") + ".com"
+                
+                if not lead.email and lead.name and domain:
+                    reacher_tasks.append(self.email_finder.get_verified_email(lead.name, domain))
+                elif lead.email:
+                    reacher_tasks.append(self.email_finder.verify_email_exists(lead.email))
+                else:
+                    async def dummy(): return None
+                    reacher_tasks.append(dummy())
+            else:
+                async def dummy(): return None
+                reacher_tasks.append(dummy())
+
+        if reacher_tasks:
+            reacher_results = await asyncio.gather(*reacher_tasks, return_exceptions=True)
+            for lead, result in zip(leads, reacher_results):
+                if isinstance(result, Exception):
+                    logger.error(f"[Reacher] Verification error: {result}")
+                    continue
+                if isinstance(result, tuple) and len(result) == 2:
+                    email, is_verified = result
+                    if email:
+                        lead.email = email
+                        lead.is_verified = is_verified
+                        if is_verified:
+                            lead.confidence = 1.0
+                        else:
+                            lead.confidence = min(lead.confidence, 0.5)
+                elif isinstance(result, bool):
+                    lead.is_verified = result
+                    if result:
+                        lead.confidence = 1.0
 
         # 3. Final Fallback: Guarantee an email/phone so the UI doesn't look broken
         import random
