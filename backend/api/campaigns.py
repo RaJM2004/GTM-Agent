@@ -36,6 +36,7 @@ class PublishRequest(BaseModel):
     image_url: Optional[str] = None
     accounts: list[str] = ["Account 1", "Account 2", "Account 3"]
     user_id: str
+    name: Optional[str] = None
 
 class DraftRequest(BaseModel):
     action: str
@@ -326,7 +327,7 @@ async def publish_linkedin_campaign(req: PublishRequest):
         import datetime
         new_campaign = {
             "user_id": req.user_id,
-            "name": req.content[:30].strip() + "..." if len(req.content) > 30 else req.content.strip(),
+            "name": req.name if req.name else (req.content[:30].strip() + "..." if len(req.content) > 30 else req.content.strip()),
             "status": "Active",
             "type": "LinkedIn",
             "progress": 100,
@@ -356,7 +357,42 @@ async def get_campaigns(user_id: str):
         c["id"] = str(c["_id"])
         del c["_id"]
         
+        # Check if audience is missing but emails were sent
+        if (not c.get("audience")) and c.get("type", "").lower() == "email" and c.get("sent", 0) > 0:
+            emails_cursor = db.emails.find({"campaign_id": c["id"]})
+            emails = await emails_cursor.to_list(length=1000)
+            if emails:
+                audience = []
+                for email_doc in emails:
+                    lead_email = email_doc.get("lead_email")
+                    # Try to fetch lead name
+                    lead = await db.leads.find_one({"email": lead_email, "user_id": user_id})
+                    name = lead.get("name", "Unknown") if lead else "Unknown"
+                    audience.append({"name": name, "contact": lead_email})
+                
+                c["audience"] = audience
+                # Update DB so we don't have to compute this next time
+                from bson.objectid import ObjectId
+                await db.campaigns.update_one({"_id": ObjectId(c["id"])}, {"$set": {"audience": audience}})
+
     return campaigns
+
+@router.delete("/{campaign_id}")
+async def delete_campaign(campaign_id: str):
+    from database import db
+    from bson.objectid import ObjectId
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    try:
+        result = await db.campaigns.delete_one({"_id": ObjectId(campaign_id)})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        return {"status": "success", "message": "Campaign deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete campaign")
 
 @router.post("/linkedin/draft")
 async def save_linkedin_draft(req: DraftRequest):
@@ -531,9 +567,14 @@ async def send_email_campaign(req: EmailSendRequest):
     from bson.objectid import ObjectId
     if db is not None:
         try:
+            new_audience_members = [{"name": l.get("name", ""), "contact": l.get("email", "")} for l in req.leads]
             await db.campaigns.update_one(
                 {"_id": ObjectId(req.campaign_id)},
-                {"$inc": {"sent": successful_sends}, "$set": {"status": "Active"}}
+                {
+                    "$inc": {"sent": successful_sends}, 
+                    "$set": {"status": "Active"},
+                    "$push": {"audience": {"$each": new_audience_members}}
+                }
             )
             # Backfill campaign_id into all email records written during this dispatch
             lead_emails = [l.get("email") for l in req.leads if l.get("email")]
@@ -582,7 +623,8 @@ async def publish_email_campaign(req: EmailPublishRequest):
         "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
         "created_at": datetime.datetime.utcnow(),
         "content": req.content,
-        "action": req.action
+        "action": req.action,
+        "audience": [{"name": l.get("name", ""), "contact": l.get("email", "")} for l in req.leads]
     }
 
     result = await db.campaigns.insert_one(new_campaign)
@@ -731,7 +773,8 @@ async def publish_sms_campaign(req: SmsPublishRequest):
         "created_at": datetime.datetime.utcnow(),
         "content": req.content,
         "image_url": req.image_url,
-        "action": req.action
+        "action": req.action,
+        "audience": [{"name": l.get("name", ""), "contact": l.get("phone", "")} for l in req.leads]
     }
     
     await db.campaigns.insert_one(new_campaign)

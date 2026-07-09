@@ -1,18 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MoreVertical, Play, Pause, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles } from 'lucide-react';
+import { Plus, MoreVertical, Play, Pause, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
-const mockCampaigns = [
-  { id: 1, name: 'Q3 Enterprise Outreach', status: 'Active', type: 'Email', progress: 65, sent: 1245, replied: 84, booked: 12, date: 'Oct 12, 2026', icon: Mail },
-  { id: 2, name: 'AI Founders Qualification', status: 'Active', type: 'Call', progress: 40, sent: 300, replied: 45, booked: 8, date: 'Oct 10, 2026', icon: PhoneCall },
-  { id: 3, name: 'Healthcare Leads Nurture', status: 'Paused', type: 'LinkedIn', progress: 15, sent: 150, replied: 12, booked: 1, date: 'Oct 05, 2026', icon: Share2 },
-  { id: 4, name: 'Follow up - Webinar', status: 'Draft', type: 'WhatsApp', progress: 0, sent: 0, replied: 0, booked: 0, date: 'Oct 15, 2026', icon: MessageCircle },
-];
 
 export default function Campaigns() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('All');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [campaignName, setCampaignName] = useState('');
   const [campaignType, setCampaignType] = useState('linkedin');
   const [objective, setObjective] = useState('engagement');
   const [action, setAction] = useState('post');
@@ -32,15 +27,13 @@ export default function Campaigns() {
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
-  const [campaignsList, setCampaignsList] = useState<any[]>(mockCampaigns);
+  const [campaignsList, setCampaignsList] = useState<any[]>([]);
 
   // View Campaign State
   const [viewingCampaign, setViewingCampaign] = useState<any>(null);
   const [industryGroups, setIndustryGroups] = useState<any[]>([]);
   const [selectedIndustries, setSelectedIndustries] = useState<Set<string>>(new Set());
   const [isSendingEmail, setIsSendingEmail] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [audienceMethod, setAudienceMethod] = useState<'leads' | 'upload'>('leads');
   const [selectedLeadEmails, setSelectedLeadEmails] = useState<Set<string>>(new Set());
   const [expandedIndustries, setExpandedIndustries] = useState<Set<string>>(new Set());
   const [onlyVerifiedEmails, setOnlyVerifiedEmails] = useState(false);
@@ -63,11 +56,27 @@ export default function Campaigns() {
           ...c,
           icon: c.type === 'LinkedIn' ? Share2 : c.type === 'Voice' ? PhoneCall : c.type === 'SMS' ? MessageCircle : Mail
         }));
-        // Use a Set or just simple prepend if there are no duplicates to worry about for now
-        setCampaignsList([...mappedData, ...mockCampaigns]);
+        setCampaignsList(mappedData);
       }
     } catch (err) {
       console.error('Failed to fetch campaigns', err);
+    }
+  };
+
+  const deleteCampaign = async (campaignId: string) => {
+    if (!confirm('Are you sure you want to delete this campaign?')) return;
+    try {
+      const res = await fetch(`http://localhost:8000/api/campaigns/${campaignId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        fetchCampaigns();
+      } else {
+        alert('Failed to delete campaign');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error deleting campaign');
     }
   };
 
@@ -84,7 +93,7 @@ export default function Campaigns() {
   });
 
   useEffect(() => {
-    if (viewingCampaign && viewingCampaign.type?.toLowerCase() === 'email') {
+    if (viewingCampaign && ['email', 'sms', 'call', 'voice'].includes(viewingCampaign.type?.toLowerCase())) {
       fetchLeads();
     }
   }, [viewingCampaign]);
@@ -102,7 +111,7 @@ export default function Campaigns() {
       // Fetch both leads and imported contacts in parallel
       const [leadsRes, contactsRes] = await Promise.all([
         fetch(`http://localhost:8000/api/leads?user_id=${currentUserId}`),
-        fetch(`http://localhost:8000/api/contacts?user_id=${currentUserId}`)
+        fetch(`http://localhost:8000/api/contacts`)
       ]);
 
       const leadsData = await leadsRes.json();
@@ -152,17 +161,31 @@ export default function Campaigns() {
       const next = new Set(prev);
       const isCurrentlySelected = next.has(industry);
 
-      setSelectedLeadEmails(prevEmails => {
-        const nextEmails = new Set(prevEmails);
-        if (isCurrentlySelected) {
-          next.delete(industry);
-          leads.forEach(l => nextEmails.delete(l.email));
-        } else {
-          next.add(industry);
-          leads.forEach(l => nextEmails.add(l.email));
-        }
-        return nextEmails;
-      });
+      if (campaignType === 'sms') {
+        setSelectedLeadPhones(prevPhones => {
+          const nextPhones = new Set(prevPhones);
+          if (isCurrentlySelected) {
+            next.delete(industry);
+            leads.filter(l => l.phone).forEach(l => nextPhones.delete(l.phone));
+          } else {
+            next.add(industry);
+            leads.filter(l => l.phone).forEach(l => nextPhones.add(l.phone));
+          }
+          return nextPhones;
+        });
+      } else {
+        setSelectedLeadEmails(prevEmails => {
+          const nextEmails = new Set(prevEmails);
+          if (isCurrentlySelected) {
+            next.delete(industry);
+            leads.filter(l => l.email).forEach(l => nextEmails.delete(l.email));
+          } else {
+            next.add(industry);
+            leads.filter(l => l.email).forEach(l => nextEmails.add(l.email));
+          }
+          return nextEmails;
+        });
+      }
       return next;
     });
   };
@@ -172,17 +195,15 @@ export default function Campaigns() {
     try {
       // Collect leads
       let collectedLeads: any[] = [];
-      if (audienceMethod === 'leads') {
-        industryGroups.forEach(g => {
-          g.leads.forEach((l: any) => {
-            if (selectedLeadEmails.has(l.email)) {
-              if (!onlyVerifiedEmails || l.is_verified) {
-                collectedLeads.push(l);
-              }
+      industryGroups.forEach(g => {
+        g.leads.forEach((l: any) => {
+          if (selectedLeadEmails.has(l.email)) {
+            if (!onlyVerifiedEmails || l.is_verified) {
+              collectedLeads.push(l);
             }
-          });
+          }
         });
-      }
+      });
 
       const res = await fetch('http://localhost:8000/api/campaigns/email/send', {
         method: 'POST',
@@ -192,7 +213,7 @@ export default function Campaigns() {
           user_id: user?.user_id || "user_12345_john_doe",
           subject: viewingCampaign.name,
           content: viewingCampaign.content || "Email Content",
-          method: audienceMethod,
+          method: "leads",
           leads: collectedLeads.map(l => ({ name: l.name, email: l.email }))
         })
       });
@@ -349,7 +370,7 @@ export default function Campaigns() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             user_id: user?.user_id || 'user_12345_john_doe',
-            name: productName || 'Voice Campaign',
+            name: campaignName || productName || 'Voice Campaign',
             prompt: voiceRefinedPrompt || voiceRawPrompt,
             first_message: voiceFirstMessage,
             leads: collectedLeads,
@@ -358,25 +379,17 @@ export default function Campaigns() {
         });
         const data = await res.json();
         alert(data.message);
-      } else if (['email', 'sms'].includes(campaignType)) {
+      } else if (campaignType === 'sms') {
         let collectedLeads: any[] = [];
-        if (audienceMethod === 'leads') {
-          industryGroups.forEach(g => {
-            (g.leads || []).forEach((l: any) => {
-              if (selectedLeadEmails.has(l.email)) {
-                if (!onlyVerifiedEmails || l.is_verified) {
-                  collectedLeads.push(l);
-                }
-              }
-            });
+        industryGroups.forEach(g => {
+          (g.leads || []).forEach((l: any) => {
+            if (l.phone && selectedLeadPhones.has(l.phone)) {
+              collectedLeads.push(l);
+            }
           });
-        }
-
-        const endpoint = campaignType === 'email'
-          ? 'http://localhost:8000/api/campaigns/email/publish'
-          : 'http://localhost:8000/api/campaigns/sms/publish';
-
-        const res = await fetch(endpoint, {
+        });
+        
+        const res = await fetch('http://localhost:8000/api/campaigns/sms/publish', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -384,14 +397,14 @@ export default function Campaigns() {
             content: generatedContent,
             image_url: imageUrl,
             user_id: user?.user_id || "user_12345_john_doe",
-            name: productName || `${campaignType.toUpperCase()} Campaign`,
-            method: audienceMethod,
-            leads: collectedLeads.map(l => ({ name: l.name, email: l.email, phone: l.phone }))
+            name: campaignName || productName || "SMS Campaign",
+            method: "leads",
+            leads: collectedLeads.map(l => ({ name: l.name, phone: l.phone }))
           })
         });
         const data = await res.json();
         if (data.status === 'error') {
-          if (data.message.includes('Twilio')) {
+          if (data.message && data.message.includes('Twilio')) {
             if (window.confirm(data.message + "\n\nWould you like to go to the Integrations page to connect it now?")) {
               window.location.href = '/app/integrations';
               return;
@@ -399,6 +412,37 @@ export default function Campaigns() {
           } else {
             alert("Error: " + data.message);
           }
+        } else {
+          alert(data.message);
+        }
+      } else if (campaignType === 'email') {
+        let collectedLeads: any[] = [];
+        industryGroups.forEach(g => {
+          (g.leads || []).forEach((l: any) => {
+            if (l.email && selectedLeadEmails.has(l.email)) {
+              if (!onlyVerifiedEmails || l.is_verified) {
+                collectedLeads.push(l);
+              }
+            }
+          });
+        });
+
+        const res = await fetch('http://localhost:8000/api/campaigns/email/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            content: generatedContent,
+            image_url: imageUrl,
+            user_id: user?.user_id || "user_12345_john_doe",
+            name: campaignName || productName || "EMAIL Campaign",
+            method: "leads",
+            leads: collectedLeads.map(l => ({ name: l.name, email: l.email, phone: l.phone }))
+          })
+        });
+        const data = await res.json();
+        if (data.status === 'error') {
+          alert("Error: " + data.message);
         } else {
           alert(data.message);
         }
@@ -410,7 +454,8 @@ export default function Campaigns() {
             action,
             content: generatedContent,
             image_url: imageUrl,
-            user_id: user?.user_id || "user_12345_john_doe"
+            user_id: user?.user_id || "user_12345_john_doe",
+            name: campaignName || productName || "LinkedIn Campaign"
           })
         });
         const data = await res.json();
@@ -420,6 +465,7 @@ export default function Campaigns() {
       setShowCreateModal(false);
       setGeneratedContent('');
       setImageUrl('');
+      setCampaignName('');
       setProductName('');
       setTargetCustomer('');
       setCallToAction('');
@@ -447,7 +493,7 @@ export default function Campaigns() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             user_id: user?.user_id || 'user_12345_john_doe',
-            name: productName || 'Untitled Voice Campaign',
+            name: campaignName || productName || 'Untitled Voice Campaign',
             prompt: voiceRefinedPrompt || voiceRawPrompt,
             first_message: voiceFirstMessage,
             leads: [],
@@ -464,7 +510,7 @@ export default function Campaigns() {
             content: generatedContent,
             image_url: imageUrl,
             user_id: user?.user_id || "user_12345_john_doe",
-            name: productName || "Untitled Campaign"
+            name: campaignName || productName || "Untitled Campaign"
           })
         });
         const data = await res.json();
@@ -473,6 +519,7 @@ export default function Campaigns() {
       setShowCreateModal(false);
       setGeneratedContent('');
       setImageUrl('');
+      setCampaignName('');
       setProductName('');
       setTargetCustomer('');
       setCallToAction('');
@@ -607,17 +654,12 @@ export default function Campaigns() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 w-full md:w-auto justify-end" onClick={e => e.stopPropagation()}>
-              {campaign.status === 'Active' ? (
-                <button className="p-2 text-gray-500 hover:text-gray-900 bg-white hover:bg-gray-100 rounded-lg transition-colors border border-gray-200 shadow-sm">
-                  <Pause className="w-4 h-4" />
-                </button>
-              ) : (
-                <button className="p-2 text-gray-500 hover:text-primary bg-white hover:bg-primary/10 rounded-lg transition-colors border border-gray-200 shadow-sm">
-                  <Play className="w-4 h-4" />
-                </button>
-              )}
-              <button className="p-2 text-gray-500 hover:text-gray-900 bg-white hover:bg-gray-100 rounded-lg transition-colors border border-gray-200 shadow-sm">
-                <MoreVertical className="w-4 h-4" />
+              <button 
+                onClick={(e) => { e.stopPropagation(); deleteCampaign(campaign.id); }}
+                className="p-2 text-red-400 hover:text-red-600 bg-white hover:bg-red-50 rounded-lg transition-colors border border-gray-200 shadow-sm"
+                title="Delete Campaign"
+              >
+                <Trash2 className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -667,6 +709,17 @@ export default function Campaigns() {
                     <option value="event_management">Event Management</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Campaign Name (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Q3 Tech Founders Outreach"
+                  className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  value={campaignName}
+                  onChange={(e) => setCampaignName(e.target.value)}
+                />
               </div>
 
               <div className="space-y-4">
@@ -986,107 +1039,82 @@ export default function Campaigns() {
                         {['email', 'sms'].includes(campaignType) && (
                           <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
                             <h3 className="text-sm font-semibold text-gray-900 mb-3">Select Audience</h3>
-                            <div className="flex gap-4 mb-4">
-                              <label className="flex items-center gap-2 cursor-pointer">
+                            <div className="mb-3">
+                              <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2 rounded border border-emerald-200">
                                 <input
-                                  type="radio"
-                                  name="newAudienceMethod"
-                                  value="leads"
-                                  checked={audienceMethod === 'leads'}
-                                  onChange={() => setAudienceMethod('leads')}
-                                  className="text-primary focus:ring-primary"
+                                  type="checkbox"
+                                  checked={onlyVerifiedEmails}
+                                  onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
+                                  className="text-emerald-600 focus:ring-emerald-500 rounded"
                                 />
-                                <span className="text-sm font-medium text-gray-700">CRM Leads</span>
-                              </label>
-                              <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                  type="radio"
-                                  name="newAudienceMethod"
-                                  value="upload"
-                                  checked={audienceMethod === 'upload'}
-                                  onChange={() => setAudienceMethod('upload')}
-                                  className="text-primary focus:ring-primary"
-                                />
-                                <span className="text-sm font-medium text-gray-700">Upload CSV</span>
+                                <span className="text-sm font-medium text-emerald-800">Only send to Verified Emails</span>
                               </label>
                             </div>
 
-                            {audienceMethod === 'leads' && (
-                              <div className="mb-3">
-                                <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2 rounded border border-emerald-200">
-                                  <input
-                                    type="checkbox"
-                                    checked={onlyVerifiedEmails}
-                                    onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
-                                    className="text-emerald-600 focus:ring-emerald-500 rounded"
-                                  />
-                                  <span className="text-sm font-medium text-emerald-800">Only send to Verified Emails</span>
-                                </label>
-                              </div>
-                            )}
-
-                            {audienceMethod === 'leads' ? (
-                              <div className="space-y-2 max-h-40 overflow-y-auto bg-white p-2 border border-gray-200 rounded">
-                                {industryGroups.length === 0 ? (
-                                  <p className="text-xs text-gray-500 italic">No leads found. Discover leads first.</p>
-                                ) : (
-                                  industryGroups.map(group => (
-                                    <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden mb-1">
-                                      <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
-                                        <input
-                                          type="checkbox"
-                                          checked={selectedIndustries.has(group.industry)}
-                                          onChange={() => toggleIndustrySelection(group.industry, group.leads)}
-                                          className="w-3.5 h-3.5 mr-2 text-primary focus:ring-primary rounded border-gray-300 cursor-pointer"
-                                        />
-                                        <div
-                                          className="flex justify-between flex-1 cursor-pointer"
-                                          onClick={() => toggleIndustryExpanded(group.industry)}
-                                        >
-                                          <span className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
-                                            {expandedIndustries.has(group.industry) ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                                            {group.industry}
-                                          </span>
-                                          <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">{group.lead_count} leads</span>
-                                        </div>
+                            <div className="space-y-2 max-h-40 overflow-y-auto bg-white p-2 border border-gray-200 rounded">
+                              {industryGroups.length === 0 ? (
+                                <p className="text-xs text-gray-500 italic">No leads found. Discover leads first.</p>
+                              ) : (
+                                industryGroups.map(group => (
+                                  <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden mb-1">
+                                    <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedIndustries.has(group.industry)}
+                                        onChange={() => toggleIndustrySelection(group.industry, group.leads)}
+                                        className="w-3.5 h-3.5 mr-2 text-primary focus:ring-primary rounded border-gray-300 cursor-pointer"
+                                      />
+                                      <div
+                                        className="flex justify-between flex-1 cursor-pointer"
+                                        onClick={() => toggleIndustryExpanded(group.industry)}
+                                      >
+                                        <span className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                                          {expandedIndustries.has(group.industry) ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                          {group.industry}
+                                        </span>
+                                        <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">{group.lead_count} leads</span>
                                       </div>
-                                      {expandedIndustries.has(group.industry) && (
-                                        <div className="bg-gray-50 p-1.5 border-t border-gray-200 pl-6 max-h-32 overflow-y-auto">
-                                          {(group.leads || []).map((lead: any, i: number) => (
-                                            <label key={i} className={`flex items-center p-1 hover:bg-white rounded transition-colors ${onlyVerifiedEmails && !lead.is_verified ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                                              <input
-                                                type="checkbox"
-                                                checked={selectedLeadEmails.has(lead.email)}
-                                                onChange={() => { if (!onlyVerifiedEmails || lead.is_verified) toggleLeadSelection(lead.email) }}
-                                                disabled={onlyVerifiedEmails && !lead.is_verified}
-                                                className="w-3 h-3 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
-                                              />
-                                              <div className="flex flex-col ml-2">
-                                                <span className="text-xs font-medium text-gray-800 flex items-center gap-1">
-                                                  {lead.name}
-                                                  {lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded leading-none">✓ Verified</span>}
-                                                </span>
-                                                <span className="text-[10px] text-gray-500">{lead.email}</span>
-                                              </div>
-                                            </label>
-                                          ))}
-                                        </div>
-                                      )}
                                     </div>
-                                  ))
-                                )}
-                              </div>
-                            ) : (
-                              <div className="bg-white p-3 rounded border border-gray-200 border-dashed text-center">
-                                <input
-                                  type="file"
-                                  accept=".csv"
-                                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                                  className="block w-full text-xs text-gray-500 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
-                                />
-                                {uploadFile && <p className="text-xs text-green-600 mt-1">Ready: {uploadFile.name}</p>}
-                              </div>
-                            )}
+                                    {expandedIndustries.has(group.industry) && (
+                                      <div className="bg-gray-50 p-1.5 border-t border-gray-200 pl-6 max-h-32 overflow-y-auto">
+                                        {(group.leads || [])
+                                          .filter((l: any) => campaignType === 'sms' ? l.phone : l.email)
+                                          .map((lead: any, i: number) => {
+                                            const isSelected = campaignType === 'sms' ? selectedLeadPhones.has(lead.phone) : selectedLeadEmails.has(lead.email);
+                                            const isDisabled = campaignType === 'email' && onlyVerifiedEmails && !lead.is_verified;
+                                            return (
+                                              <label key={i} className={`flex items-center p-1 hover:bg-white rounded transition-colors ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isSelected}
+                                                  onChange={() => {
+                                                    if (!isDisabled) {
+                                                      if (campaignType === 'sms') {
+                                                        toggleLeadPhoneSelection(lead.phone);
+                                                      } else {
+                                                        toggleLeadSelection(lead.email);
+                                                      }
+                                                    }
+                                                  }}
+                                                  disabled={isDisabled}
+                                                  className="w-3 h-3 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
+                                                />
+                                                <div className="flex flex-col ml-2">
+                                                  <span className="text-xs font-medium text-gray-800 flex items-center gap-1">
+                                                    {lead.name || 'Unnamed'}
+                                                    {campaignType === 'email' && lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded leading-none">✓ Verified</span>}
+                                                  </span>
+                                                  <span className="text-[10px] text-gray-500">{campaignType === 'sms' ? lead.phone : lead.email}</span>
+                                                </div>
+                                              </label>
+                                            );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))
+                              )}
+                            </div>
                           </div>
                         )}
 
@@ -1132,9 +1160,18 @@ export default function Campaigns() {
                   <p className="text-sm text-gray-500">{viewingCampaign.type} Campaign • {viewingCampaign.status}</p>
                 </div>
               </div>
-              <button onClick={() => setViewingCampaign(null)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => deleteCampaign(viewingCampaign.id)}
+                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Delete Campaign"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+                <button onClick={() => setViewingCampaign(null)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <div className="p-6 space-y-6 overflow-y-auto flex-1">
@@ -1153,56 +1190,50 @@ export default function Campaigns() {
                 </div>
               )}
 
-              {/* Email Sending Section */}
-              {viewingCampaign.type?.toLowerCase() === 'email' && (
+              {/* Audience Viewer or Send Section */}
+              {viewingCampaign.audience ? (
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Target Audience ({viewingCampaign.audience.length})</h3>
+                  <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                          <th className="p-3">Name</th>
+                          <th className="p-3">Contact</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {viewingCampaign.audience.map((member: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-gray-50 text-sm">
+                            <td className="p-3 text-gray-900 font-medium">{member.name || 'Unknown'}</td>
+                            <td className="p-3 text-gray-500">{member.contact || member.email || member.phone}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
                 <div className="border-t border-gray-100 pt-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Send Campaign</h3>
-
-                  <div className="flex gap-4 mb-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
+                  {/* Sending UI */}
+                      <div className="mb-4">
+                    <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
                       <input
-                        type="radio"
-                        name="audienceMethod"
-                        value="leads"
-                        checked={audienceMethod === 'leads'}
-                        onChange={() => setAudienceMethod('leads')}
-                        className="text-primary focus:ring-primary"
+                        type="checkbox"
+                        checked={onlyVerifiedEmails}
+                        onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
+                        className="text-emerald-600 focus:ring-emerald-500 rounded"
                       />
-                      <span className="text-sm font-medium text-gray-700">Select from CRM Leads</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="audienceMethod"
-                        value="upload"
-                        checked={audienceMethod === 'upload'}
-                        onChange={() => setAudienceMethod('upload')}
-                        className="text-primary focus:ring-primary"
-                      />
-                      <span className="text-sm font-medium text-gray-700">Upload CSV Contacts</span>
+                      <span className="text-sm font-medium text-emerald-800">Only send to Verified Emails</span>
                     </label>
                   </div>
 
-                  {audienceMethod === 'leads' && (
-                    <div className="mb-4">
-                      <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
-                        <input
-                          type="checkbox"
-                          checked={onlyVerifiedEmails}
-                          onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
-                          className="text-emerald-600 focus:ring-emerald-500 rounded"
-                        />
-                        <span className="text-sm font-medium text-emerald-800">Only send to Verified Emails</span>
-                      </label>
-                    </div>
-                  )}
-
-                  {audienceMethod === 'leads' ? (
-                    <div className="space-y-3 bg-gray-50 p-4 rounded-lg border border-gray-200 max-h-60 overflow-y-auto">
-                      <p className="text-sm text-gray-600 mb-2">Select industries to send to:</p>
-                      {industryGroups.length === 0 ? (
-                        <p className="text-sm text-gray-500 italic">No leads found. Discover leads first.</p>
-                      ) : (
+                  <div className="space-y-3 bg-gray-50 p-4 rounded-lg border border-gray-200 max-h-60 overflow-y-auto">
+                    <p className="text-sm text-gray-600 mb-2">Select industries to send to:</p>
+                    {industryGroups.length === 0 ? (
+                      <p className="text-sm text-gray-500 italic">No leads found. Discover leads first.</p>
+                    ) : (
                         industryGroups.map(group => (
                           <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden">
                             <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
@@ -1225,48 +1256,54 @@ export default function Campaigns() {
                             </div>
                             {expandedIndustries.has(group.industry) && (
                               <div className="bg-gray-50 p-2 border-t border-gray-200 pl-8 max-h-40 overflow-y-auto">
-                                {(group.leads || []).map((lead: any, i: number) => (
-                                  <label key={i} className={`flex items-center p-1.5 hover:bg-white rounded transition-colors ${onlyVerifiedEmails && !lead.is_verified ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedLeadEmails.has(lead.email)}
-                                      onChange={() => { if (!onlyVerifiedEmails || lead.is_verified) toggleLeadSelection(lead.email) }}
-                                      disabled={onlyVerifiedEmails && !lead.is_verified}
-                                      className="w-3.5 h-3.5 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
-                                    />
-                                    <div className="flex flex-col ml-3">
-                                      <span className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
-                                        {lead.name}
-                                        {lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded leading-none">✓ Verified</span>}
-                                      </span>
-                                      <span className="text-xs text-gray-500">{lead.email}</span>
-                                    </div>
-                                  </label>
-                                ))}
+                                {(group.leads || [])
+                                  .filter((l: any) => {
+                                    const t = viewingCampaign.type?.toLowerCase();
+                                    return (t === 'sms' || t === 'call' || t === 'voice') ? l.phone : l.email;
+                                  })
+                                  .map((lead: any, i: number) => {
+                                    const t = viewingCampaign.type?.toLowerCase();
+                                    const isSmsOrCall = (t === 'sms' || t === 'call' || t === 'voice');
+                                    const isSelected = isSmsOrCall ? selectedLeadPhones.has(lead.phone) : selectedLeadEmails.has(lead.email);
+                                    const isDisabled = !isSmsOrCall && onlyVerifiedEmails && !lead.is_verified;
+                                    
+                                    return (
+                                      <label key={i} className={`flex items-center p-1.5 hover:bg-white rounded transition-colors ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => { 
+                                            if (!isDisabled) {
+                                              if (isSmsOrCall) {
+                                                toggleLeadPhoneSelection(lead.phone);
+                                              } else {
+                                                toggleLeadSelection(lead.email);
+                                              }
+                                            }
+                                          }}
+                                          disabled={isDisabled}
+                                          className="w-3.5 h-3.5 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
+                                        />
+                                        <div className="flex flex-col ml-3">
+                                          <span className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                                            {lead.name || 'Unnamed'}
+                                            {!isSmsOrCall && lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded leading-none">✓ Verified</span>}
+                                          </span>
+                                          <span className="text-xs text-gray-500">{isSmsOrCall ? lead.phone : lead.email}</span>
+                                        </div>
+                                      </label>
+                                    );
+                                  })}
                               </div>
                             )}
                           </div>
                         ))
                       )}
                     </div>
-                  ) : (
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 border-dashed text-center">
-                      <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                      <p className="text-sm text-gray-600 mb-2">Upload a CSV file containing Name and Email columns.</p>
-                      <input
-                        type="file"
-                        accept=".csv"
-                        onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer mx-auto max-w-xs"
-                      />
-                      {uploadFile && <p className="text-xs text-green-600 mt-2">File selected: {uploadFile.name}</p>}
-                    </div>
-                  )}
-
                   <div className="mt-6">
                     <button
                       onClick={handleSendEmailCampaign}
-                      disabled={isSendingEmail || (audienceMethod === 'leads' && selectedLeadEmails.size === 0) || (audienceMethod === 'upload' && !uploadFile)}
+                      disabled={isSendingEmail || selectedLeadEmails.size === 0}
                       className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
                     >
                       {isSendingEmail ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}

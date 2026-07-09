@@ -48,7 +48,8 @@ async def get_all_contacts(user_id: str = ""):
             return ContactsResponse(success=True, total_contacts=0, contact_groups=[])
 
         collection = db.contacts
-        cursor = collection.find({"user_id": user_id} if user_id else {})
+        query = {"$or": [{"user_id": user_id}, {"user_id": ""}, {"user_id": {"$exists": False}}]} if user_id else {}
+        cursor = collection.find(query)
         all_contacts = await cursor.to_list(length=5000)
 
         # Group by list_name
