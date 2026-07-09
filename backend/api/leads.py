@@ -33,6 +33,7 @@ class LeadItem(BaseModel):
     company_size: str = ""
     is_verified: bool = False
     reply_status: Optional[str] = None
+    last_reply_body: Optional[str] = None
 
 
 class IndustryGroup(BaseModel):
@@ -89,6 +90,7 @@ async def get_all_leads(user_id: str = ""):
                 company_size=doc.get("company_size", ""),
                 is_verified=doc.get("is_verified", False),
                 reply_status=doc.get("reply_status", None),
+                last_reply_body=doc.get("last_reply_body", None),
             ))
             prompt = doc.get("discovery_prompt", "")
             if prompt:

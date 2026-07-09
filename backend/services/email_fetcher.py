@@ -103,7 +103,14 @@ async def fetch_real_emails(email_address: str, password: str, host: str = "", f
                     
                 # Parse date
                 date_str = msg["Date"] or "Unknown Time"
-                
+
+                # Extract threading headers for reply matching
+                raw_message_id = msg.get("Message-ID", "") or ""
+                raw_in_reply_to = msg.get("In-Reply-To", "") or ""
+                # Clean angle-bracket wrappers: <msgid@domain> -> msgid@domain
+                message_id_clean = raw_message_id.strip().strip("<>").strip()
+                in_reply_to_clean = raw_in_reply_to.strip().strip("<>").strip()
+
                 # Retrieve email body text
                 body = ""
                 html_body = ""
@@ -112,7 +119,7 @@ async def fetch_real_emails(email_address: str, password: str, host: str = "", f
                     for part in msg.walk():
                         content_type = part.get_content_type()
                         content_disposition = str(part.get("Content-Disposition"))
-                        
+
                         if "attachment" not in content_disposition:
                             if content_type == "text/html":
                                 payload = part.get_payload(decode=True)
@@ -130,18 +137,46 @@ async def fetch_real_emails(email_address: str, password: str, host: str = "", f
                             html_body = payload.decode(errors="ignore")
                         else:
                             text_body = payload.decode(errors="ignore")
-                            
+
                 if html_body:
-                    body = html_body
+                    try:
+                        from bs4 import BeautifulSoup
+                        import re
+                        soup = BeautifulSoup(html_body, "html.parser")
+                        # Find and remove quoting blocks (gmail_quote, yahoo_quoted, etc)
+                        for el in soup.find_all(lambda tag: tag.has_attr('class') and any('quote' in c.lower() or 'attr' in c.lower() for c in tag['class'])):
+                            el.decompose()
+                        # Fallback: remove blockquotes
+                        for el in soup.find_all('blockquote'):
+                            el.decompose()
+                        
+                        body_text = soup.get_text(separator="\n").strip()
+                        body = re.sub(r'\n{3,}', '\n\n', body_text)
+                    except Exception:
+                        # Fallback if beautifulsoup fails
+                        import re
+                        body_clean = html_body.strip()
+                        text_only = re.sub(r'<[^>]+>', ' ', body_clean).replace('&nbsp;', ' ').strip()
+                        body = re.sub(r'\s+', ' ', text_only)
                 else:
-                    body = text_body.replace('\n', '<br>')
-                
+                    body = text_body.strip()
+                    # Strip text quotes if possible (basic approach)
+                    lines = body.split('\n')
+                    clean_lines = []
+                    for line in lines:
+                        if line.startswith('>'):
+                            continue
+                        if "wrote:" in line and "On " in line:
+                            break
+                        clean_lines.append(line)
+                    body = '\n'.join(clean_lines).strip()
+
                 import re
                 body_clean = body.strip()
                 text_only = re.sub(r'<[^>]+>', ' ', body_clean).replace('&nbsp;', ' ').strip()
                 text_only = re.sub(r'\s+', ' ', text_only)
                 preview = text_only[:120] + "..." if len(text_only) > 120 else text_only
-                
+
                 email_list.append({
                     "id": idx + 1,
                     "name": sender_name or sender_email or "External Sender",
@@ -152,8 +187,11 @@ async def fetch_real_emails(email_address: str, password: str, host: str = "", f
                     "body": body_clean or "(No text content)",
                     "time": date_str,
                     "unread": False,
-                    "channel": "email"
+                    "channel": "email",
+                    "message_id": message_id_clean,
+                    "in_reply_to": in_reply_to_clean,
                 })
+
             except Exception as e:
                 logger.error(f"Error parsing email message {mail_id}: {e}")
                 continue
@@ -232,6 +270,8 @@ async def fetch_emails_via_gmail_api(access_token: str, folder: str = "inbox") -
                 subject = "No Subject"
                 from_sender = "Unknown Sender"
                 date_str = ""
+                raw_message_id = ""
+                raw_in_reply_to = ""
                 for h in headers_list:
                     name = h.get("name", "").lower()
                     if name == "subject":
@@ -240,6 +280,14 @@ async def fetch_emails_via_gmail_api(access_token: str, folder: str = "inbox") -
                         from_sender = h.get("value", "")
                     elif name == "date":
                         date_str = h.get("value", "")
+                    elif name == "message-id":
+                        raw_message_id = h.get("value", "")
+                    elif name == "in-reply-to":
+                        raw_in_reply_to = h.get("value", "")
+
+                # Clean angle-bracket wrappers for easy matching
+                message_id_clean = raw_message_id.strip().strip("<>").strip()
+                in_reply_to_clean = raw_in_reply_to.strip().strip("<>").strip()
                         
                 sender_name = from_sender
                 sender_email = ""
@@ -292,6 +340,34 @@ async def fetch_emails_via_gmail_api(access_token: str, folder: str = "inbox") -
                         except Exception:
                             body = ""
                         
+                # Clean HTML and quoted replies
+                try:
+                    from bs4 import BeautifulSoup
+                    import re
+                    # Check if body has HTML tags
+                    if "<" in body and ">" in body:
+                        soup = BeautifulSoup(body, "html.parser")
+                        for el in soup.find_all(lambda tag: tag.has_attr('class') and any('quote' in c.lower() or 'attr' in c.lower() for c in tag['class'])):
+                            el.decompose()
+                        for el in soup.find_all('blockquote'):
+                            el.decompose()
+                        body_text = soup.get_text(separator="\n").strip()
+                        body = re.sub(r'\n{3,}', '\n\n', body_text)
+                    else:
+                        # Plain text parsing
+                        body = body.replace("<br>", "\n")
+                        lines = body.split('\n')
+                        clean_lines = []
+                        for line in lines:
+                            if line.startswith('>'):
+                                continue
+                            if "wrote:" in line and "On " in line:
+                                break
+                            clean_lines.append(line)
+                        body = '\n'.join(clean_lines).strip()
+                except Exception:
+                    pass
+
                 import re
                 body_clean = body.strip()
                 text_only = re.sub(r'<[^>]+>', ' ', body_clean).replace('&nbsp;', ' ').strip()
@@ -308,8 +384,11 @@ async def fetch_emails_via_gmail_api(access_token: str, folder: str = "inbox") -
                     "body": body_clean or msg_data.get("snippet", "") or "(No text content)",
                     "time": date_str,
                     "unread": "UNREAD" in msg_data.get("labelIds", []),
-                    "channel": "email"
+                    "channel": "email",
+                    "message_id": message_id_clean,
+                    "in_reply_to": in_reply_to_clean,
                 })
+
             except Exception as parse_err:
                 logger.error(f"Error parsing Gmail API message {msg_id}: {parse_err}")
                 continue

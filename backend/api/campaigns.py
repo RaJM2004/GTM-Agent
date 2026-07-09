@@ -413,32 +413,32 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
                 except Exception as e:
                     logger.error(f"Failed to refresh gmail token in dispatcher: {e}")
 
+    import datetime
+    from services.personalization import personalize_email_content
+    from services.billing import check_and_deduct_credits
+
     for lead in leads:
         lead_email = lead.get("email")
         if not lead_email:
             continue
-            
+
         lead_name = lead.get("name") or "there"
-        personalized_content = content
-        
-        from services.personalization import personalize_email_content
-        from services.billing import check_and_deduct_credits
-        
         sender_name = user.get("name", "Sales Team")
-        
+
         # Use AI to perfectly craft the email for this specific lead
         personalized_content = await personalize_email_content(content, lead, sender_name)
         await check_and_deduct_credits(user_id, "ai_personalizations", amount=1, dry_run=False)
-        
+
+        send_result = None
         if method.lower() == "gmail":
-            success = await send_email_via_gmail_api(
+            send_result = await send_email_via_gmail_api(
                 access_token=creds.get("access_token"),
                 to=lead_email,
                 subject=subject,
                 body=personalized_content
             )
         else:
-            success = await send_email_via_smtp(
+            send_result = await send_email_via_smtp(
                 email=creds.get("email"),
                 password=creds.get("password"),
                 host=creds.get("host", "smtp.gmail.com"),
@@ -447,27 +447,49 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
                 subject=subject,
                 body=personalized_content
             )
-            
-        if success:
+
+        # send_result is a dict: {"success": bool, "message_id": str|None}
+        if send_result and send_result.get("success"):
             successful_sends += 1
             await check_and_deduct_credits(user_id, "emails_sent", amount=1, dry_run=False)
-            
-            # Mark the lead as emailed in the database so we can track their replies later
+
+            message_id = send_result.get("message_id")
+
             if db is not None:
                 try:
+                    # Mark lead as emailed so we can filter for reply tracking later
                     await db.leads.update_many(
                         {"email": lead_email, "user_id": user_id},
                         {"$set": {"emailed_via_gtm": True}}
                     )
+
+                    # Insert a record into the emails collection linking this send to the campaign
+                    # We'll use this record to match inbound replies via In-Reply-To == message_id
+                    lead_doc = await db.leads.find_one({"email": lead_email, "user_id": user_id})
+                    email_record = {
+                        "user_id": user_id,
+                        "campaign_id": None,   # filled in by the caller (send/publish route)
+                        "lead_id": str(lead_doc["_id"]) if lead_doc else None,
+                        "lead_email": lead_email,
+                        "message_id": message_id,
+                        "subject": subject,
+                        "body": personalized_content,
+                        "status": "sent",
+                        "reply_body": None,
+                        "reply_status": None,
+                        "sent_at": datetime.datetime.utcnow(),
+                    }
+                    await db.emails.insert_one(email_record)
+                    logger.info(f"Email record saved for lead {lead_email} (Message-ID: {message_id})")
                 except Exception as e:
-                    logger.error(f"Failed to update emailed_via_gtm for {lead_email}: {e}")
-            
+                    logger.error(f"Failed to update lead/email record for {lead_email}: {e}")
+
     return successful_sends
 
 @router.post("/email/send")
 async def send_email_campaign(req: EmailSendRequest):
     logger.info(f"Sending email campaign '{req.subject}' to {len(req.leads)} leads via {req.method}.")
-    
+
     try:
         successful_sends = await _dispatch_emails(
             user_id=req.user_id,
@@ -478,7 +500,7 @@ async def send_email_campaign(req: EmailSendRequest):
         )
     except ValueError as e:
         return {"status": "error", "message": str(e)}
-    
+
     from database import db
     from bson.objectid import ObjectId
     if db is not None:
@@ -487,11 +509,17 @@ async def send_email_campaign(req: EmailSendRequest):
                 {"_id": ObjectId(req.campaign_id)},
                 {"$inc": {"sent": successful_sends}, "$set": {"status": "Active"}}
             )
+            # Backfill campaign_id into all email records written during this dispatch
+            lead_emails = [l.get("email") for l in req.leads if l.get("email")]
+            await db.emails.update_many(
+                {"user_id": req.user_id, "campaign_id": None, "lead_email": {"$in": lead_emails}},
+                {"$set": {"campaign_id": req.campaign_id}}
+            )
         except Exception as e:
-            logger.error(f"Failed to update campaign sent count: {e}")
+            logger.error(f"Failed to update campaign sent count or backfill campaign_id: {e}")
 
     return {
-        "status": "success", 
+        "status": "success",
         "message": f"Successfully sent email campaign to {successful_sends} out of {len(req.leads)} contacts!"
     }
 
@@ -499,12 +527,12 @@ async def send_email_campaign(req: EmailSendRequest):
 async def publish_email_campaign(req: EmailPublishRequest):
     from database import db
     import datetime
-    
+
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
-        
+
     logger.info(f"Publishing email campaign '{req.name}' to {len(req.leads)} leads via {req.method}.")
-    
+
     try:
         successful_sends = await _dispatch_emails(
             user_id=req.user_id,
@@ -515,7 +543,7 @@ async def publish_email_campaign(req: EmailPublishRequest):
         )
     except ValueError as e:
         return {"status": "error", "message": str(e)}
-    
+
     new_campaign = {
         "user_id": req.user_id,
         "name": req.name,
@@ -530,10 +558,22 @@ async def publish_email_campaign(req: EmailPublishRequest):
         "content": req.content,
         "action": req.action
     }
-    
-    await db.campaigns.insert_one(new_campaign)
-    
+
+    result = await db.campaigns.insert_one(new_campaign)
+    campaign_id_str = str(result.inserted_id)
+
+    # Backfill campaign_id into all email records written during this dispatch
+    try:
+        lead_emails = [l.get("email") for l in req.leads if l.get("email")]
+        await db.emails.update_many(
+            {"user_id": req.user_id, "campaign_id": None, "lead_email": {"$in": lead_emails}},
+            {"$set": {"campaign_id": campaign_id_str}}
+        )
+    except Exception as e:
+        logger.error(f"Failed to backfill campaign_id in emails collection: {e}")
+
     return {"status": "success", "message": f"Successfully published and sent email campaign to {successful_sends} contacts!"}
+
 
 async def _dispatch_sms(user_id: str, leads: list, content: str) -> int:
     from database import db

@@ -2,44 +2,54 @@ import base64
 import logging
 import httpx
 from email.message import EmailMessage
+from email.utils import make_msgid
 import smtplib
 
 logger = logging.getLogger(__name__)
 
-async def send_email_via_gmail_api(access_token: str, to: str, subject: str, body: str) -> bool:
-    """Send an email using the Gmail REST API with an OAuth access token."""
+async def send_email_via_gmail_api(access_token: str, to: str, subject: str, body: str) -> dict:
+    """Send an email using the Gmail REST API with an OAuth access token.
+    Returns dict with keys: success (bool), message_id (str or None).
+    """
     try:
         message = EmailMessage()
         message.set_content(body)
         message['To'] = to
         message['Subject'] = subject
-        
+
+        # Generate a unique Message-ID so we can track replies via In-Reply-To
+        msg_id = make_msgid(domain="gtm.app")
+        message['Message-ID'] = msg_id
+
         # Base64url encode the message
         encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        
+
         payload = {
             'raw': encoded_message
         }
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
                 headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
                 json=payload
             )
-            
+
             if response.status_code in [200, 201]:
-                logger.info(f"Successfully sent email to {to} via Gmail API")
-                return True
+                logger.info(f"Successfully sent email to {to} via Gmail API (Message-ID: {msg_id})")
+                return {"success": True, "message_id": msg_id}
             else:
                 logger.error(f"Failed to send email via Gmail API: {response.text}")
-                return False
+                return {"success": False, "message_id": None}
     except Exception as e:
         logger.error(f"Exception sending via Gmail API: {e}")
-        return False
+        return {"success": False, "message_id": None}
 
-async def send_email_via_smtp(email: str, password: str, host: str, port: int, to: str, subject: str, body: str) -> bool:
-    """Send an email using standard SMTP credentials."""
+
+async def send_email_via_smtp(email: str, password: str, host: str, port: int, to: str, subject: str, body: str) -> dict:
+    """Send an email using standard SMTP credentials.
+    Returns dict with keys: success (bool), message_id (str or None).
+    """
     try:
         message = EmailMessage()
         message.set_content(body)
@@ -47,14 +57,18 @@ async def send_email_via_smtp(email: str, password: str, host: str, port: int, t
         message['To'] = to
         message['Subject'] = subject
 
-        # Use smtplib (blocking call, but usually fast enough for single sends, or could use aiosmtplib)
+        # Generate a unique Message-ID so we can track replies via In-Reply-To
+        msg_id = make_msgid(domain="gtm.app")
+        message['Message-ID'] = msg_id
+
+        # Use smtplib (blocking call, but usually fast enough for single sends)
         with smtplib.SMTP(host, port) as server:
             server.starttls()
             server.login(email, password)
             server.send_message(message)
-            
-        logger.info(f"Successfully sent email to {to} via SMTP")
-        return True
+
+        logger.info(f"Successfully sent email to {to} via SMTP (Message-ID: {msg_id})")
+        return {"success": True, "message_id": msg_id}
     except Exception as e:
         logger.error(f"Exception sending via SMTP: {e}")
-        return False
+        return {"success": False, "message_id": None}

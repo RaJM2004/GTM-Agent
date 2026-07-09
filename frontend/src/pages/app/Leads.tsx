@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Download, Plus, MoreHorizontal, UserCircle, Building2, Phone, Mail, FolderOpen, ChevronDown, ChevronRight, Loader2, Trash2, Users, Globe, ExternalLink, RefreshCw, Bot, Laptop, HeartPulse, Wallet, Cloud, GraduationCap, ShoppingCart, Building, Link as LinkIcon, Folder, Upload } from 'lucide-react';
+import { Search, Filter, Download, Plus, MoreHorizontal, UserCircle, Building2, Phone, Mail, FolderOpen, ChevronDown, ChevronRight, Loader2, Trash2, Users, Globe, ExternalLink, RefreshCw, Bot, Laptop, HeartPulse, Wallet, Cloud, GraduationCap, ShoppingCart, Building, Link as LinkIcon, Folder, Upload, MessageSquare, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
@@ -19,6 +19,7 @@ interface Lead {
   company_size: string;
   is_verified: boolean;
   reply_status?: string;
+  last_reply_body?: string;
 }
 
 interface IndustryGroup {
@@ -58,6 +59,7 @@ export default function Leads() {
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<string | null>(null);
   const [replyFilter, setReplyFilter] = useState<'All' | 'Positive' | 'Negative' | 'Neutral'>('All');
+  const [replyModalLead, setReplyModalLead] = useState<Lead | null>(null);
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -461,17 +463,29 @@ export default function Leads() {
                                 </div>
                               </td>
                               <td className="px-5 py-3">
-                                {lead.reply_status ? (
-                                  <span className={`text-xs px-2 py-1 rounded-full font-bold ${
-                                    lead.reply_status === 'Positive' ? 'bg-green-100 text-green-700' :
-                                    lead.reply_status === 'Negative' ? 'bg-red-100 text-red-700' :
-                                    'bg-gray-100 text-gray-700'
-                                  }`}>
-                                    {lead.reply_status}
-                                  </span>
-                                ) : (
-                                  <span className="text-xs text-gray-400">—</span>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  {lead.reply_status ? (
+                                    <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                                      lead.reply_status === 'Positive' ? 'bg-green-100 text-green-700' :
+                                      lead.reply_status === 'Negative' ? 'bg-red-100 text-red-700' :
+                                      'bg-gray-100 text-gray-700'
+                                    }`}>
+                                      {lead.reply_status}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">—</span>
+                                  )}
+                                  {lead.last_reply_body && (
+                                    <button
+                                      id={`reply-msg-btn-${lead.email?.replace(/[@.]/g, '-')}`}
+                                      title="View Reply Message"
+                                      onClick={() => setReplyModalLead(lead)}
+                                      className="p-1 rounded hover:bg-indigo-50 text-indigo-500 hover:text-indigo-700 transition-colors"
+                                    >
+                                      <MessageSquare size={14} />
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-5 py-3">
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${
@@ -494,6 +508,49 @@ export default function Leads() {
               </div>
             );
           })}
+        </div>
+      )}
+      {/* Reply Message Modal */}
+      {replyModalLead && (
+        <div
+          id="reply-message-modal-overlay"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setReplyModalLead(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full mx-4 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-gray-900">{replyModalLead.name}</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{replyModalLead.email}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {replyModalLead.reply_status && (
+                  <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                    replyModalLead.reply_status === 'Positive' ? 'bg-green-100 text-green-700' :
+                    replyModalLead.reply_status === 'Negative' ? 'bg-red-100 text-red-700' :
+                    'bg-gray-100 text-gray-700'
+                  }`}>
+                    {replyModalLead.reply_status}
+                  </span>
+                )}
+                <button
+                  id="reply-message-modal-close"
+                  onClick={() => setReplyModalLead(null)}
+                  className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="border border-gray-100 rounded-xl bg-gray-50 p-4 max-h-72 overflow-y-auto">
+              <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                {replyModalLead.last_reply_body}
+              </p>
+            </div>
+          </div>
         </div>
       )}
     </div>
