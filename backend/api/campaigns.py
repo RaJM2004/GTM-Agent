@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 from pydantic import BaseModel
 from groq import AsyncGroq
 
@@ -64,13 +64,39 @@ class SmsSendRequest(BaseModel):
     campaign_id: str
     user_id: str
     content: str
+    image_url: Optional[str] = None
     leads: list[dict] = []
 
 class SmsPublishRequest(BaseModel):
     action: str
     content: str
+    image_url: Optional[str] = None
     user_id: str
     name: str
+    leads: list[dict] = []
+
+# ── Voice Campaign Models ─────────────────────────────────────────────────────
+
+class VoicePromptRefineRequest(BaseModel):
+    user_id: str
+    raw_prompt: str
+    product_name: str = ""
+    target_customer: str = ""
+    call_to_action: str = ""
+
+class VoicePublishRequest(BaseModel):
+    user_id: str
+    name: str
+    prompt: str  # The refined system prompt for the AI agent
+    first_message: str = "Hello! Thanks for taking my call."
+    leads: list[dict] = []  # [{name, phone}]
+    send_followup_sms: bool = True
+
+class VoiceDraftRequest(BaseModel):
+    user_id: str
+    name: str
+    prompt: str
+    first_message: str = "Hello! Thanks for taking my call."
     leads: list[dict] = []
 
 def get_groq_client():
@@ -535,9 +561,11 @@ async def publish_email_campaign(req: EmailPublishRequest):
     
     return {"status": "success", "message": f"Successfully published and sent email campaign to {successful_sends} contacts!"}
 
-async def _dispatch_sms(user_id: str, leads: list, content: str) -> int:
+async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str = None) -> int:
     from database import db
     from services.sms_sender import send_sms_via_twilio
+    import os
+    from config import settings
     
     user = await db.users.find_one({"user_id": user_id})
     logger.info(f"Dispatching SMS for user {user_id}. Leads count: {len(leads)}")
@@ -566,12 +594,23 @@ async def _dispatch_sms(user_id: str, leads: list, content: str) -> int:
         lead_name = lead.get("name", "there")
         personalized_content = content.replace("[Name]", lead_name).replace("{Name}", lead_name)
         
+        # Format image URL for Twilio
+        formatted_media_url = None
+        if image_url:
+            if image_url.startswith("http") and "localhost" not in image_url:
+                formatted_media_url = image_url
+            else:
+                # Twilio cannot reach localhost URLs. For local testing, we fallback to a public placeholder.
+                # In production, this would be the actual deployed URL (e.g., https://yourdomain.com/static/...)
+                formatted_media_url = "https://images.unsplash.com/photo-1611162617474-5b21e879e113?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+
         success = await send_sms_via_twilio(
             account_sid=account_sid,
             auth_token=auth_token,
             from_number=from_number,
             to=lead_phone,
-            body=personalized_content
+            body=personalized_content,
+            media_url=formatted_media_url
         )
             
         if success:
@@ -598,7 +637,8 @@ async def send_sms_campaign(req: SmsSendRequest):
         successful_sends = await _dispatch_sms(
             user_id=req.user_id,
             leads=req.leads,
-            content=req.content
+            content=req.content,
+            image_url=req.image_url
         )
     except ValueError as e:
         return {"status": "error", "message": str(e)}
@@ -633,7 +673,8 @@ async def publish_sms_campaign(req: SmsPublishRequest):
         successful_sends = await _dispatch_sms(
             user_id=req.user_id,
             leads=req.leads,
-            content=req.content
+            content=req.content,
+            image_url=req.image_url
         )
     except ValueError as e:
         return {"status": "error", "message": str(e)}
@@ -650,10 +691,361 @@ async def publish_sms_campaign(req: SmsPublishRequest):
         "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
         "created_at": datetime.datetime.utcnow(),
         "content": req.content,
+        "image_url": req.image_url,
         "action": req.action
     }
     
     await db.campaigns.insert_one(new_campaign)
     
     return {"status": "success", "message": f"Successfully published and sent SMS campaign to {successful_sends} contacts!"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VOICE CALL CAMPAIGN ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/voice/refine-prompt")
+async def refine_voice_prompt_endpoint(req: VoicePromptRefineRequest):
+    """Refines a user's raw voice prompt into a professional AI agent script."""
+    from services.vapi_service import refine_voice_prompt
+    
+    try:
+        refined = await refine_voice_prompt(
+            raw_prompt=req.raw_prompt,
+            product_name=req.product_name,
+            target_customer=req.target_customer,
+            call_to_action=req.call_to_action,
+        )
+        return {"status": "success", "refined_prompt": refined}
+    except Exception as e:
+        logger.error(f"Failed to refine voice prompt: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/voice/publish")
+async def publish_voice_campaign(req: VoicePublishRequest):
+    """
+    Publishes and launches a voice call campaign.
+    Creates a per-user VAPI assistant, then calls each lead sequentially.
+    Runs the calling loop as a background task.
+    """
+    from database import db, save_call_log
+    from services.vapi_service import (
+        create_or_update_assistant,
+        make_outbound_call,
+        poll_call_status,
+        process_call_transcript,
+    )
+    from services.sms_sender import send_sms_via_twilio
+    from services.billing import check_and_deduct_credits
+    import datetime
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    # 1. Get user's Twilio credentials from MongoDB
+    user = await db.users.find_one({"user_id": req.user_id})
+    if not user or "integrations" not in user or "twilio" not in user["integrations"]:
+        return {
+            "status": "error",
+            "message": "Twilio account is not connected. Please go to Integrations and connect your Twilio account."
+        }
+    
+    twilio_creds = user["integrations"]["twilio"]
+    account_sid = twilio_creds.get("account_sid")
+    auth_token = twilio_creds.get("auth_token")
+    from_number = twilio_creds.get("from_number")
+    
+    if not account_sid or not auth_token or not from_number:
+        return {
+            "status": "error",
+            "message": "Incomplete Twilio credentials. Please check your Integrations."
+        }
+    
+    # 2. Check credits
+    try:
+        await check_and_deduct_credits(req.user_id, "voice_calls", amount=1, dry_run=True)
+    except Exception:
+        pass  # Allow if billing not fully set up
+    
+    # 3. Create/update per-user VAPI assistant with the refined prompt
+    try:
+        assistant_id = await create_or_update_assistant(
+            user_id=req.user_id,
+            system_prompt=req.prompt,
+            assistant_name=req.name,
+            first_message=req.first_message,
+        )
+    except Exception as e:
+        logger.error(f"Failed to create VAPI assistant: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to set up voice agent: {str(e)}"}
+    
+    # 4. Create campaign record in MongoDB
+    campaign_doc = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Active",
+        "type": "Voice",
+        "progress": 0,
+        "sent": 0,
+        "replied": 0,
+        "booked": 0,
+        "total_leads": len(req.leads),
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "prompt": req.prompt,
+        "first_message": req.first_message,
+        "assistant_id": assistant_id,
+        "action": "call",
+    }
+    result = await db.campaigns.insert_one(campaign_doc)
+    campaign_id = str(result.inserted_id)
+    
+    # 5. Launch calls as a background task
+    import asyncio
+    
+    async def _run_voice_campaign():
+        """Background task: call each lead sequentially."""
+        from bson.objectid import ObjectId
+        successful_calls = 0
+        positive_count = 0
+        
+        for idx, lead in enumerate(req.leads):
+            lead_name = lead.get("name", "there")
+            lead_phone = lead.get("phone", "")
+            
+            if not lead_phone:
+                logger.warning(f"Skipping lead {lead_name}: no phone number")
+                continue
+            
+            logger.info(f"[Voice Campaign {campaign_id}] Calling {idx+1}/{len(req.leads)}: {lead_name}")
+            
+            # Make the call
+            call_id, call_status = await make_outbound_call(
+                assistant_id=assistant_id,
+                phone=lead_phone,
+                name=lead_name,
+                twilio_account_sid=account_sid,
+                twilio_auth_token=auth_token,
+                twilio_from_number=from_number,
+            )
+            
+            # Save initial call log
+            call_log = {
+                "user_id": req.user_id,
+                "campaign_id": campaign_id,
+                "call_id": call_id or "",
+                "lead_name": lead_name,
+                "lead_phone": lead_phone,
+                "status": call_status,
+                "transcript": "",
+                "recording_url": "",
+                "summary": "",
+                "checklist": [],
+                "sentiment": "",
+                "sms_status": "",
+                "sms_content": "",
+                "duration": 0,
+                "created_at": datetime.datetime.utcnow(),
+            }
+            await save_call_log(call_log)
+            
+            if not call_id:
+                logger.error(f"Call to {lead_name} failed to initiate: {call_status}")
+                continue
+            
+            # Poll for call completion
+            result_data = await poll_call_status(call_id, timeout=300)
+            
+            # Process transcript if available
+            transcript = result_data.get("transcript", "")
+            analysis = {"summary": "", "checklist": [], "sms_message": "", "sentiment": "Neutral"}
+            if transcript:
+                analysis = await process_call_transcript(transcript)
+            
+            # Update call log
+            from database import update_call_log
+            update_data = {
+                "status": result_data.get("status", "unknown"),
+                "transcript": transcript,
+                "recording_url": result_data.get("recording_url", ""),
+                "duration": result_data.get("duration", 0),
+                "summary": analysis.get("summary", ""),
+                "checklist": analysis.get("checklist", []),
+                "sentiment": analysis.get("sentiment", "Neutral"),
+                "ended_reason": result_data.get("ended_reason", ""),
+                "updated_at": datetime.datetime.utcnow(),
+            }
+            await update_call_log(call_id, update_data)
+            
+            successful_calls += 1
+            if analysis.get("sentiment") == "Positive":
+                positive_count += 1
+            
+            # Send follow-up SMS if enabled and transcript was captured
+            if req.send_followup_sms and analysis.get("sms_message"):
+                sms_success = await send_sms_via_twilio(
+                    account_sid=account_sid,
+                    auth_token=auth_token,
+                    from_number=from_number,
+                    to=lead_phone,
+                    body=analysis["sms_message"],
+                )
+                sms_update = {
+                    "sms_status": "sent" if sms_success else "failed",
+                    "sms_content": analysis["sms_message"],
+                }
+                await update_call_log(call_id, sms_update)
+            
+            # Deduct credits
+            try:
+                await check_and_deduct_credits(req.user_id, "voice_calls", amount=1, dry_run=False)
+            except Exception:
+                pass
+            
+            # Update campaign progress
+            progress = int(((idx + 1) / len(req.leads)) * 100)
+            try:
+                await db.campaigns.update_one(
+                    {"_id": ObjectId(campaign_id)},
+                    {"$set": {
+                        "sent": successful_calls,
+                        "booked": positive_count,
+                        "progress": progress,
+                    }}
+                )
+            except Exception as e:
+                logger.error(f"Failed to update campaign progress: {e}")
+            
+            # Small delay between calls to avoid rate limits
+            await asyncio.sleep(2)
+        
+        # Mark campaign as completed
+        try:
+            await db.campaigns.update_one(
+                {"_id": ObjectId(campaign_id)},
+                {"$set": {
+                    "progress": 100,
+                    "sent": successful_calls,
+                    "booked": positive_count,
+                    "status": "Completed" if successful_calls > 0 else "Failed",
+                }}
+            )
+        except Exception as e:
+            logger.error(f"Failed to finalize campaign: {e}")
+        
+        logger.info(f"[Voice Campaign {campaign_id}] Completed. {successful_calls}/{len(req.leads)} calls made.")
+    
+    # Fire and forget the background task
+    asyncio.create_task(_run_voice_campaign())
+    
+    return {
+        "status": "success",
+        "message": f"Voice campaign '{req.name}' launched! Calling {len(req.leads)} leads.",
+        "campaign_id": campaign_id,
+        "assistant_id": assistant_id,
+    }
+
+
+@router.post("/voice/webhook")
+async def voice_webhook(request: Request):
+    """
+    Receives VAPI call-ended webhooks.
+    Updates the call log with transcript, recording, and processes via Groq.
+    """
+    from database import update_call_log
+    from services.vapi_service import process_call_transcript
+    from services.sms_sender import send_sms_via_twilio
+    import datetime
+    
+    try:
+        data = await request.json()
+        if not data:
+            return {"success": False, "error": "Empty body"}
+        
+        message_type = data.get("message", {}).get("type", "")
+        call = data.get("message", {}).get("call", data)
+        call_id = call.get("id", "")
+        status = call.get("status", "")
+        
+        logger.info(f"Voice webhook received: type={message_type}, call_id={call_id}, status={status}")
+        
+        if status in ("ended", "fulfilled"):
+            transcript = call.get("transcript", "")
+            recording_url = call.get("recordingUrl", "")
+            duration = call.get("duration", 0)
+            
+            # Process transcript
+            analysis = {"summary": "", "checklist": [], "sms_message": "", "sentiment": "Neutral"}
+            if transcript:
+                analysis = await process_call_transcript(transcript)
+            
+            update_data = {
+                "status": status,
+                "transcript": transcript,
+                "recording_url": recording_url,
+                "duration": duration,
+                "summary": analysis.get("summary", ""),
+                "checklist": analysis.get("checklist", []),
+                "sentiment": analysis.get("sentiment", "Neutral"),
+                "ended_reason": call.get("endedReason", ""),
+                "updated_at": datetime.datetime.utcnow(),
+            }
+            
+            await update_call_log(call_id, update_data)
+            logger.info(f"Updated call log {call_id} via webhook")
+        
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Voice webhook error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/voice/calls")
+async def get_voice_calls(user_id: str, campaign_id: str = None):
+    """Get call logs for a user, optionally filtered by campaign."""
+    from database import get_call_logs
+    
+    logs = await get_call_logs(user_id, campaign_id)
+    return {"calls": logs}
+
+
+@router.get("/voice/stats")
+async def get_voice_stats(user_id: str):
+    """Get aggregated call statistics for the Calls dashboard."""
+    from database import get_call_stats
+    
+    stats = await get_call_stats(user_id)
+    return stats
+
+
+@router.post("/voice/draft")
+async def save_voice_draft(req: VoiceDraftRequest):
+    """Save a voice campaign as a draft without launching calls."""
+    from database import db
+    import datetime
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    new_draft = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Draft",
+        "type": "Voice",
+        "progress": 0,
+        "sent": 0,
+        "replied": 0,
+        "booked": 0,
+        "total_leads": len(req.leads),
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "prompt": req.prompt,
+        "first_message": req.first_message,
+        "leads": req.leads,
+        "action": "call",
+    }
+    
+    await db.campaigns.insert_one(new_draft)
+    return {"status": "success", "message": "Voice campaign saved as draft!"}
 

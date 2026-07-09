@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MoreVertical, Play, Pause, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, MoreVertical, Play, Pause, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const mockCampaigns = [
@@ -27,7 +27,7 @@ export default function Campaigns() {
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
-  
+
   const [imageOption, setImageOption] = useState<'none' | 'upload' | 'generate'>('none');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -45,6 +45,14 @@ export default function Campaigns() {
   const [expandedIndustries, setExpandedIndustries] = useState<Set<string>>(new Set());
   const [onlyVerifiedEmails, setOnlyVerifiedEmails] = useState(false);
 
+  // Voice Campaign State
+  const [voiceRawPrompt, setVoiceRawPrompt] = useState('');
+  const [voiceRefinedPrompt, setVoiceRefinedPrompt] = useState('');
+  const [voiceFirstMessage, setVoiceFirstMessage] = useState('Hello! Thanks for taking my call.');
+  const [isRefiningPrompt, setIsRefiningPrompt] = useState(false);
+  const [sendFollowupSms, setSendFollowupSms] = useState(true);
+  const [selectedLeadPhones, setSelectedLeadPhones] = useState<Set<string>>(new Set());
+
   const fetchCampaigns = async () => {
     try {
       const userId = user?.user_id || 'user_12345_john_doe';
@@ -53,7 +61,7 @@ export default function Campaigns() {
       if (Array.isArray(data)) {
         const mappedData = data.map((c: any) => ({
           ...c,
-          icon: c.type === 'LinkedIn' ? Share2 : Mail
+          icon: c.type === 'LinkedIn' ? Share2 : c.type === 'Voice' ? PhoneCall : c.type === 'SMS' ? MessageCircle : Mail
         }));
         // Use a Set or just simple prepend if there are no duplicates to worry about for now
         setCampaignsList([...mappedData, ...mockCampaigns]);
@@ -82,7 +90,7 @@ export default function Campaigns() {
   }, [viewingCampaign]);
 
   useEffect(() => {
-    if (showCreateModal && (campaignType === 'email' || campaignType === 'sms')) {
+    if (showCreateModal && (campaignType === 'email' || campaignType === 'sms' || campaignType === 'voice')) {
       fetchLeads();
     }
   }, [showCreateModal, campaignType]);
@@ -90,22 +98,22 @@ export default function Campaigns() {
   const fetchLeads = async () => {
     try {
       const currentUserId = user?.user_id || 'user_12345_john_doe';
-      
+
       // Fetch both leads and imported contacts in parallel
       const [leadsRes, contactsRes] = await Promise.all([
         fetch(`http://localhost:8000/api/leads?user_id=${currentUserId}`),
         fetch(`http://localhost:8000/api/contacts?user_id=${currentUserId}`)
       ]);
-      
+
       const leadsData = await leadsRes.json();
       const contactsData = await contactsRes.json();
-      
+
       let allGroups: any[] = [];
-      
+
       if (leadsData.success && leadsData.industry_groups) {
         allGroups = [...leadsData.industry_groups];
       }
-      
+
       if (contactsData.success && contactsData.contact_groups) {
         const mappedContacts = contactsData.contact_groups.map((cg: any) => ({
           industry: `(CSV) ${cg.list_name}`,
@@ -114,7 +122,7 @@ export default function Campaigns() {
         }));
         allGroups = [...allGroups, ...mappedContacts];
       }
-      
+
       setIndustryGroups(allGroups);
     } catch (err) {
       console.error('Failed to fetch audiences:', err);
@@ -143,7 +151,7 @@ export default function Campaigns() {
     setSelectedIndustries(prev => {
       const next = new Set(prev);
       const isCurrentlySelected = next.has(industry);
-      
+
       setSelectedLeadEmails(prevEmails => {
         const nextEmails = new Set(prevEmails);
         if (isCurrentlySelected) {
@@ -206,14 +214,14 @@ export default function Campaigns() {
       const res = await fetch('http://localhost:8000/api/campaigns/generate-content', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           channel: campaignType,
           objective: objective,
-          action: action, 
+          action: action,
           product_name: productName,
           target_customer: targetCustomer,
           call_to_action: callToAction,
-          product_info: productInfo 
+          product_info: productInfo
         })
       });
       const data = await res.json();
@@ -233,11 +241,11 @@ export default function Campaigns() {
   const handleUploadImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
-    
+
     setIsUploadingImage(true);
     const formData = new FormData();
     formData.append('file', file);
-    
+
     try {
       const res = await fetch('http://localhost:8000/api/campaigns/linkedin/upload-image', {
         method: 'POST',
@@ -269,10 +277,88 @@ export default function Campaigns() {
     setIsGeneratingImage(false);
   };
 
+  // Voice: Refine prompt via AI
+  const handleRefineVoicePrompt = async () => {
+    setIsRefiningPrompt(true);
+    try {
+      const res = await fetch('http://localhost:8000/api/campaigns/voice/refine-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.user_id || 'user_12345_john_doe',
+          raw_prompt: voiceRawPrompt,
+          product_name: productName,
+          target_customer: targetCustomer,
+          call_to_action: callToAction,
+        })
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setVoiceRefinedPrompt(data.refined_prompt);
+      } else {
+        alert(data.message || 'Failed to refine prompt');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to refine voice prompt');
+    }
+    setIsRefiningPrompt(false);
+  };
+
+  // Voice: toggle phone selection
+  const toggleLeadPhoneSelection = (phone: string) => {
+    setSelectedLeadPhones(prev => {
+      const next = new Set(prev);
+      if (next.has(phone)) next.delete(phone);
+      else next.add(phone);
+      return next;
+    });
+  };
+
+  // Voice: toggle all phones in industry
+  const toggleIndustryPhoneSelection = (industry: string, leads: any[]) => {
+    const phonesInGroup = (leads || []).filter((l: any) => l.phone).map((l: any) => l.phone);
+    setSelectedLeadPhones(prev => {
+      const next = new Set(prev);
+      const allSelected = phonesInGroup.every((p: string) => next.has(p));
+      if (allSelected) {
+        phonesInGroup.forEach((p: string) => next.delete(p));
+      } else {
+        phonesInGroup.forEach((p: string) => next.add(p));
+      }
+      return next;
+    });
+  };
+
   const handlePublish = async () => {
     setIsPublishing(true);
     try {
-      if (['email', 'sms'].includes(campaignType)) {
+      if (campaignType === 'voice') {
+        // Voice campaign publish
+        let collectedLeads: any[] = [];
+        industryGroups.forEach((g: any) => {
+          (g.leads || []).forEach((l: any) => {
+            if (selectedLeadPhones.has(l.phone)) {
+              collectedLeads.push({ name: l.name, phone: l.phone });
+            }
+          });
+        });
+
+        const res = await fetch('http://localhost:8000/api/campaigns/voice/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: user?.user_id || 'user_12345_john_doe',
+            name: productName || 'Voice Campaign',
+            prompt: voiceRefinedPrompt || voiceRawPrompt,
+            first_message: voiceFirstMessage,
+            leads: collectedLeads,
+            send_followup_sms: sendFollowupSms,
+          })
+        });
+        const data = await res.json();
+        alert(data.message);
+      } else if (['email', 'sms'].includes(campaignType)) {
         let collectedLeads: any[] = [];
         if (audienceMethod === 'leads') {
           industryGroups.forEach(g => {
@@ -285,17 +371,18 @@ export default function Campaigns() {
             });
           });
         }
-        
-        const endpoint = campaignType === 'email' 
-          ? 'http://localhost:8000/api/campaigns/email/publish' 
+
+        const endpoint = campaignType === 'email'
+          ? 'http://localhost:8000/api/campaigns/email/publish'
           : 'http://localhost:8000/api/campaigns/sms/publish';
 
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            action, 
-            content: generatedContent, 
+          body: JSON.stringify({
+            action,
+            content: generatedContent,
+            image_url: imageUrl,
             user_id: user?.user_id || "user_12345_john_doe",
             name: productName || `${campaignType.toUpperCase()} Campaign`,
             method: audienceMethod,
@@ -308,17 +395,17 @@ export default function Campaigns() {
         const res = await fetch('http://localhost:8000/api/campaigns/linkedin/publish', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            action, 
-            content: generatedContent, 
+          body: JSON.stringify({
+            action,
+            content: generatedContent,
             image_url: imageUrl,
-            user_id: user?.user_id || "user_12345_john_doe" 
+            user_id: user?.user_id || "user_12345_john_doe"
           })
         });
         const data = await res.json();
         alert(data.message);
       }
-      
+
       setShowCreateModal(false);
       setGeneratedContent('');
       setImageUrl('');
@@ -328,7 +415,11 @@ export default function Campaigns() {
       setProductInfo('');
       setImageOption('none');
       setSelectedIndustries(new Set());
-      fetchCampaigns(); // Refresh the list
+      setVoiceRawPrompt('');
+      setVoiceRefinedPrompt('');
+      setVoiceFirstMessage('Hello! Thanks for taking my call.');
+      setSelectedLeadPhones(new Set());
+      fetchCampaigns();
     } catch (err) {
       console.error(err);
       alert('Failed to publish campaign');
@@ -339,19 +430,35 @@ export default function Campaigns() {
   const handleSaveDraft = async () => {
     setIsSavingDraft(true);
     try {
-      const res = await fetch('http://localhost:8000/api/campaigns/linkedin/draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action, 
-          content: generatedContent, 
-          image_url: imageUrl,
-          user_id: user?.user_id || "user_12345_john_doe",
-          name: productName || "Untitled Campaign"
-        })
-      });
-      const data = await res.json();
-      alert(data.message);
+      if (campaignType === 'voice') {
+        const res = await fetch('http://localhost:8000/api/campaigns/voice/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: user?.user_id || 'user_12345_john_doe',
+            name: productName || 'Untitled Voice Campaign',
+            prompt: voiceRefinedPrompt || voiceRawPrompt,
+            first_message: voiceFirstMessage,
+            leads: [],
+          })
+        });
+        const data = await res.json();
+        alert(data.message);
+      } else {
+        const res = await fetch('http://localhost:8000/api/campaigns/linkedin/draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            content: generatedContent,
+            image_url: imageUrl,
+            user_id: user?.user_id || "user_12345_john_doe",
+            name: productName || "Untitled Campaign"
+          })
+        });
+        const data = await res.json();
+        alert(data.message);
+      }
       setShowCreateModal(false);
       setGeneratedContent('');
       setImageUrl('');
@@ -360,7 +467,11 @@ export default function Campaigns() {
       setCallToAction('');
       setProductInfo('');
       setImageOption('none');
-      fetchCampaigns(); // Refresh the list
+      setVoiceRawPrompt('');
+      setVoiceRefinedPrompt('');
+      setVoiceFirstMessage('Hello! Thanks for taking my call.');
+      setSelectedLeadPhones(new Set());
+      fetchCampaigns();
     } catch (err) {
       console.error(err);
       alert('Failed to save draft');
@@ -375,7 +486,7 @@ export default function Campaigns() {
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Campaigns</h1>
           <p className="text-sm text-gray-500">Manage and monitor your automated multi-channel outreach.</p>
         </div>
-        <button 
+        <button
           onClick={() => setShowCreateModal(true)}
           className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg font-medium text-sm transition-colors shadow-sm flex items-center gap-2"
         >
@@ -405,17 +516,16 @@ export default function Campaigns() {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                activeTab === tab 
-                  ? 'bg-[#FDF8F5] text-primary shadow-sm border border-[#F2DED6]' 
+              className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${activeTab === tab
+                  ? 'bg-[#FDF8F5] text-primary shadow-sm border border-[#F2DED6]'
                   : 'text-gray-500 hover:text-gray-900'
-              }`}
+                }`}
             >
               {tab}
             </button>
           ))}
         </div>
-        
+
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
@@ -429,8 +539,8 @@ export default function Campaigns() {
       {/* Campaign List */}
       <div className="grid grid-cols-1 gap-4">
         {displayedCampaigns.map((campaign, idx) => (
-          <div 
-            key={campaign.id || idx} 
+          <div
+            key={campaign.id || idx}
             className="bg-white hover:bg-gray-50 rounded-xl p-5 border border-[#F2DED6] shadow-sm flex flex-col md:flex-row items-center gap-6 transition-colors cursor-pointer"
             onClick={() => setViewingCampaign(campaign)}
           >
@@ -452,18 +562,17 @@ export default function Campaigns() {
             {/* Status & Progress */}
             <div className="w-full md:w-48">
               <div className="flex justify-between items-end mb-2">
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                  campaign.status === 'Active' ? 'bg-green-100 text-green-700 border border-green-200' :
-                  campaign.status === 'Paused' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
-                  'bg-gray-100 text-gray-600 border border-gray-200'
-                }`}>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${campaign.status === 'Active' ? 'bg-green-100 text-green-700 border border-green-200' :
+                    campaign.status === 'Paused' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+                      'bg-gray-100 text-gray-600 border border-gray-200'
+                  }`}>
                   {campaign.status}
                 </span>
                 <span className="text-xs text-gray-500 font-medium">{campaign.progress}%</span>
               </div>
               <div className="w-full bg-gray-100 rounded-full h-1.5 border border-gray-200">
-                <div 
-                  className={`h-1.5 rounded-full ${campaign.status === 'Active' ? 'bg-primary' : 'bg-gray-400'}`} 
+                <div
+                  className={`h-1.5 rounded-full ${campaign.status === 'Active' ? 'bg-primary' : 'bg-gray-400'}`}
                   style={{ width: `${campaign.progress}%` }}
                 ></div>
               </div>
@@ -509,17 +618,19 @@ export default function Campaigns() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div ref={modalRef} className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center p-6 border-b border-gray-100 flex-shrink-0">
-              <h2 className="text-xl font-bold text-gray-900">Create LinkedIn Campaign</h2>
+              <h2 className="text-xl font-bold text-gray-900">
+                {campaignType === 'voice' ? 'Create Voice Call Campaign' : `Create ${campaignType.charAt(0).toUpperCase() + campaignType.slice(1)} Campaign`}
+              </h2>
               <button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-6 overflow-y-auto flex-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Channel</label>
-                  <select 
+                  <select
                     className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white"
                     value={campaignType}
                     onChange={(e) => setCampaignType(e.target.value)}
@@ -534,7 +645,7 @@ export default function Campaigns() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Campaign Objective</label>
-                  <select 
+                  <select
                     className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white"
                     value={objective}
                     onChange={(e) => setObjective(e.target.value)}
@@ -553,22 +664,22 @@ export default function Campaigns() {
                     <label className="block text-sm font-medium text-gray-700 mb-2">LinkedIn Action Type</label>
                     <div className="flex gap-4">
                       <label className="flex items-center gap-2">
-                        <input 
-                          type="radio" 
-                          name="action" 
-                          value="post" 
-                          checked={action === 'post'} 
-                          onChange={() => setAction('post')} 
+                        <input
+                          type="radio"
+                          name="action"
+                          value="post"
+                          checked={action === 'post'}
+                          onChange={() => setAction('post')}
                         />
                         <span>Create a Post</span>
                       </label>
                       <label className="flex items-center gap-2">
-                        <input 
-                          type="radio" 
-                          name="action" 
-                          value="dm" 
-                          checked={action === 'dm'} 
-                          onChange={() => setAction('dm')} 
+                        <input
+                          type="radio"
+                          name="action"
+                          value="dm"
+                          checked={action === 'dm'}
+                          onChange={() => setAction('dm')}
                         />
                         <span>Send Direct Message</span>
                       </label>
@@ -576,281 +687,421 @@ export default function Campaigns() {
                   </div>
                 )}
 
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Product/Service Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Genquantaa AI Agent"
+                      className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      value={productName}
+                      onChange={(e) => setProductName(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Target Customer</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., CTOs, Sales Leaders in Healthcare"
+                      className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      value={targetCustomer}
+                      onChange={(e) => setTargetCustomer(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Call to Action (Goal)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Book a demo, Read the blog, Reply to this message"
+                      className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      value={callToAction}
+                      onChange={(e) => setCallToAction(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Session/Product Details</label>
+                    <textarea
+                      placeholder="e.g., Features, benefits, what makes it special, or session agenda..."
+                      className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-primary focus:border-transparent h-24"
+                      value={productInfo}
+                      onChange={(e) => setProductInfo(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Voice-specific form section */}
+                {campaignType === 'voice' ? (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Product/Service Name</label>
-                      <input 
-                        type="text"
-                        placeholder="e.g., Genquantaa AI Agent"
-                        className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                        value={productName}
-                        onChange={(e) => setProductName(e.target.value)}
+                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2">
+                        <Mic className="w-4 h-4 text-primary" />
+                        What should your AI voice agent say?
+                      </label>
+                      <textarea
+                        placeholder="Describe what you want your AI agent to say on the call. For example: 'Call the prospect, introduce yourself as a representative from [Company], ask if they're interested in [Product], handle objections about pricing, and try to book a meeting...'"
+                        className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-primary focus:border-transparent h-32"
+                        value={voiceRawPrompt}
+                        onChange={(e) => setVoiceRawPrompt(e.target.value)}
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Target Customer</label>
-                      <input 
-                        type="text"
-                        placeholder="e.g., CTOs, Sales Leaders in Healthcare"
-                        className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                        value={targetCustomer}
-                        onChange={(e) => setTargetCustomer(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Call to Action (Goal)</label>
-                      <input 
-                        type="text"
-                        placeholder="e.g., Book a demo, Read the blog, Reply to this message"
-                        className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                        value={callToAction}
-                        onChange={(e) => setCallToAction(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Session/Product Details</label>
-                      <textarea 
-                        placeholder="e.g., Features, benefits, what makes it special, or session agenda..."
-                        className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-primary focus:border-transparent h-24"
-                        value={productInfo}
-                        onChange={(e) => setProductInfo(e.target.value)}
-                      />
-                    </div>
-                  </div>
 
-                  <button 
-                    onClick={handleGenerateContent}
-                    disabled={isGeneratingContent || !productName || !productInfo}
-                    className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    {isGeneratingContent ? <Loader2 className="w-4 h-4 animate-spin" /> : <MoreVertical className="w-4 h-4" />}
-                    {isGeneratingContent ? 'Generating with AI...' : 'Generate Content'}
-                  </button>
+                    <button
+                      onClick={handleRefineVoicePrompt}
+                      disabled={isRefiningPrompt || !voiceRawPrompt}
+                      className="w-full bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-white font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
+                    >
+                      {isRefiningPrompt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      {isRefiningPrompt ? 'Refining with AI...' : 'Refine Prompt with AI'}
+                    </button>
 
-                  {generatedContent && (
-                    <div className="space-y-4 pt-4 border-t border-gray-100">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Review Content</label>
-                        <textarea 
-                          className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-primary focus:border-transparent min-h-[150px]"
-                          value={generatedContent}
-                          onChange={(e) => setGeneratedContent(e.target.value)}
+                    {voiceRefinedPrompt && (
+                      <div className="space-y-3 pt-4 border-t border-gray-100">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Refined AI Agent Script (editable)</label>
+                        <textarea
+                          className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-primary focus:border-transparent min-h-[200px] text-sm font-mono bg-gray-50"
+                          value={voiceRefinedPrompt}
+                          onChange={(e) => setVoiceRefinedPrompt(e.target.value)}
                         />
                       </div>
+                    )}
 
-                      {action === 'post' && (
-                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                          <label className="block text-sm font-medium text-gray-700 mb-3">Add an Image (Optional)</label>
-                          <div className="flex gap-4 mb-4">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input 
-                                type="radio" 
-                                name="imageOption" 
-                                value="none" 
-                                checked={imageOption === 'none'} 
-                                onChange={() => setImageOption('none')} 
-                                className="text-primary focus:ring-primary"
-                              />
-                              <span className="text-sm text-gray-700">No Image</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input 
-                                type="radio" 
-                                name="imageOption" 
-                                value="upload" 
-                                checked={imageOption === 'upload'} 
-                                onChange={() => setImageOption('upload')} 
-                                className="text-primary focus:ring-primary"
-                              />
-                              <span className="text-sm text-gray-700">Upload Image</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input 
-                                type="radio" 
-                                name="imageOption" 
-                                value="generate" 
-                                checked={imageOption === 'generate'} 
-                                onChange={() => setImageOption('generate')} 
-                                className="text-primary focus:ring-primary"
-                              />
-                              <span className="text-sm text-gray-700">AI Generate</span>
-                            </label>
-                          </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">First Message (opening line)</label>
+                      <input
+                        type="text"
+                        placeholder="Hello! Thanks for taking my call."
+                        className="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        value={voiceFirstMessage}
+                        onChange={(e) => setVoiceFirstMessage(e.target.value)}
+                      />
+                    </div>
 
-                          {imageOption === 'generate' && !imageUrl && (
-                            <button 
-                              onClick={handleGenerateImage}
-                              disabled={isGeneratingImage}
+                    <label className="flex items-center gap-2 cursor-pointer bg-blue-50 p-2.5 rounded-lg border border-blue-200">
+                      <input
+                        type="checkbox"
+                        checked={sendFollowupSms}
+                        onChange={(e) => setSendFollowupSms(e.target.checked)}
+                        className="text-blue-600 focus:ring-blue-500 rounded"
+                      />
+                      <span className="text-sm font-medium text-blue-800">Send follow-up SMS after each call</span>
+                    </label>
+
+                    {/* Lead phone selection for voice */}
+                    {(voiceRefinedPrompt || voiceRawPrompt) && (
+                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                          <PhoneCall className="w-4 h-4" />
+                          Select Leads to Call ({selectedLeadPhones.size} selected)
+                        </h3>
+                        <div className="space-y-2 max-h-48 overflow-y-auto bg-white p-2 border border-gray-200 rounded">
+                          {industryGroups.length === 0 ? (
+                            <p className="text-xs text-gray-500 italic">No leads found. Discover leads first.</p>
+                          ) : (
+                            industryGroups.map((group: any) => (
+                              <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden mb-1">
+                                <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
+                                  <input
+                                    type="checkbox"
+                                    checked={(group.leads || []).filter((l: any) => l.phone).every((l: any) => selectedLeadPhones.has(l.phone))}
+                                    onChange={() => toggleIndustryPhoneSelection(group.industry, group.leads)}
+                                    className="w-3.5 h-3.5 mr-2 text-primary focus:ring-primary rounded border-gray-300 cursor-pointer"
+                                  />
+                                  <div
+                                    className="flex justify-between flex-1 cursor-pointer"
+                                    onClick={() => toggleIndustryExpanded(group.industry)}
+                                  >
+                                    <span className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                                      {expandedIndustries.has(group.industry) ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                      {group.industry}
+                                    </span>
+                                    <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">
+                                      {(group.leads || []).filter((l: any) => l.phone).length} with phone
+                                    </span>
+                                  </div>
+                                </div>
+                                {expandedIndustries.has(group.industry) && (
+                                  <div className="bg-gray-50 p-1.5 border-t border-gray-200 pl-6 max-h-32 overflow-y-auto">
+                                    {(group.leads || []).filter((l: any) => l.phone).map((lead: any, i: number) => (
+                                      <label key={i} className="flex items-center p-1 hover:bg-white rounded transition-colors cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedLeadPhones.has(lead.phone)}
+                                          onChange={() => toggleLeadPhoneSelection(lead.phone)}
+                                          className="w-3 h-3 text-primary focus:ring-primary rounded border-gray-300"
+                                        />
+                                        <div className="flex flex-col ml-2">
+                                          <span className="text-xs font-medium text-gray-800">{lead.name}</span>
+                                          <span className="text-[10px] text-gray-500">{lead.phone}</span>
+                                        </div>
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        {/* Voice publish/draft buttons */}
+                        <div className="flex gap-4 mt-4">
+                          <button
+                            onClick={handleSaveDraft}
+                            disabled={isSavingDraft || isPublishing}
+                            className="w-1/3 bg-white border border-[#F2DED6] hover:bg-gray-50 text-gray-900 font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            {isSavingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                            {isSavingDraft ? 'Saving...' : 'Save Draft'}
+                          </button>
+                          <button
+                            onClick={handlePublish}
+                            disabled={isPublishing || isSavingDraft || selectedLeadPhones.size === 0}
+                            className="w-2/3 bg-green-600 hover:bg-green-700 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
+                          >
+                            {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <PhoneCall className="w-4 h-4" />}
+                            {isPublishing ? 'Launching Calls...' : `Call ${selectedLeadPhones.size} Lead${selectedLeadPhones.size !== 1 ? 's' : ''}`}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* Standard (non-voice) form section */
+                  <>
+                <button
+                  onClick={handleGenerateContent}
+                  disabled={isGeneratingContent || !productName || !productInfo}
+                  className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isGeneratingContent ? <Loader2 className="w-4 h-4 animate-spin" /> : <MoreVertical className="w-4 h-4" />}
+                  {isGeneratingContent ? 'Generating with AI...' : 'Generate Content'}
+                </button>
+
+                {generatedContent && (
+                  <div className="space-y-4 pt-4 border-t border-gray-100">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Review Content</label>
+                      <textarea
+                        className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-primary focus:border-transparent min-h-[150px]"
+                        value={generatedContent}
+                        onChange={(e) => setGeneratedContent(e.target.value)}
+                      />
+                    </div>
+
+                    {action === 'post' && (
+                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <label className="block text-sm font-medium text-gray-700 mb-3">Add an Image (Optional)</label>
+                        <div className="flex gap-4 mb-4">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="imageOption"
+                              value="none"
+                              checked={imageOption === 'none'}
+                              onChange={() => setImageOption('none')}
+                              className="text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm text-gray-700">No Image</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="imageOption"
+                              value="upload"
+                              checked={imageOption === 'upload'}
+                              onChange={() => setImageOption('upload')}
+                              className="text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm text-gray-700">Upload Image</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="imageOption"
+                              value="generate"
+                              checked={imageOption === 'generate'}
+                              onChange={() => setImageOption('generate')}
+                              className="text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm text-gray-700">AI Generate</span>
+                          </label>
+                        </div>
+
+                        {imageOption === 'generate' && !imageUrl && (
+                          <button
+                            onClick={handleGenerateImage}
+                            disabled={isGeneratingImage}
+                            className="w-full bg-white border border-[#F2DED6] hover:bg-gray-50 text-gray-900 font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            {isGeneratingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                            {isGeneratingImage ? 'Generating Image...' : 'Generate Image (FLUX.1-schnell)'}
+                          </button>
+                        )}
+
+                        {imageOption === 'upload' && !imageUrl && (
+                          <div className="w-full">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              ref={fileInputRef}
+                              onChange={handleUploadImage}
+                              className="hidden"
+                            />
+                            <button
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={isUploadingImage}
                               className="w-full bg-white border border-[#F2DED6] hover:bg-gray-50 text-gray-900 font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
                             >
-                              {isGeneratingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
-                              {isGeneratingImage ? 'Generating Image...' : 'Generate Image (FLUX.1-schnell)'}
+                              {isUploadingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                              {isUploadingImage ? 'Uploading...' : 'Click to Upload Image'}
                             </button>
-                          )}
+                          </div>
+                        )}
 
-                          {imageOption === 'upload' && !imageUrl && (
-                            <div className="w-full">
-                              <input 
-                                type="file" 
-                                accept="image/*" 
-                                ref={fileInputRef} 
-                                onChange={handleUploadImage} 
-                                className="hidden" 
-                              />
-                              <button 
-                                onClick={() => fileInputRef.current?.click()}
-                                disabled={isUploadingImage}
-                                className="w-full bg-white border border-[#F2DED6] hover:bg-gray-50 text-gray-900 font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
-                              >
-                                {isUploadingImage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                                {isUploadingImage ? 'Uploading...' : 'Click to Upload Image'}
-                              </button>
-                            </div>
-                          )}
+                        {imageUrl && imageOption !== 'none' && (
+                          <div className="mt-4 border border-gray-200 rounded-lg p-2 bg-white relative">
+                            <img src={imageUrl} alt="Campaign Media" className="w-full h-auto rounded-md object-contain max-h-[300px]" />
+                            <button
+                              onClick={() => setImageUrl('')}
+                              className="absolute top-4 right-4 bg-white/80 p-1.5 rounded-full hover:bg-white text-gray-700 shadow-sm"
+                              title="Remove Image"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-                          {imageUrl && imageOption !== 'none' && (
-                            <div className="mt-4 border border-gray-200 rounded-lg p-2 bg-white relative">
-                              <img src={imageUrl} alt="Campaign Media" className="w-full h-auto rounded-md object-contain max-h-[300px]" />
-                              <button 
-                                onClick={() => setImageUrl('')}
-                                className="absolute top-4 right-4 bg-white/80 p-1.5 rounded-full hover:bg-white text-gray-700 shadow-sm"
-                                title="Remove Image"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-                          )}
+                    {['email', 'sms'].includes(campaignType) && (
+                      <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
+                        <h3 className="text-sm font-semibold text-gray-900 mb-3">Select Audience</h3>
+                        <div className="flex gap-4 mb-4">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="newAudienceMethod"
+                              value="leads"
+                              checked={audienceMethod === 'leads'}
+                              onChange={() => setAudienceMethod('leads')}
+                              className="text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm font-medium text-gray-700">CRM Leads</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="newAudienceMethod"
+                              value="upload"
+                              checked={audienceMethod === 'upload'}
+                              onChange={() => setAudienceMethod('upload')}
+                              className="text-primary focus:ring-primary"
+                            />
+                            <span className="text-sm font-medium text-gray-700">Upload CSV</span>
+                          </label>
                         </div>
-                      )}
 
-                      {['email', 'sms'].includes(campaignType) && (
-                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
-                          <h3 className="text-sm font-semibold text-gray-900 mb-3">Select Audience</h3>
-                          <div className="flex gap-4 mb-4">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input 
-                                type="radio" 
-                                name="newAudienceMethod" 
-                                value="leads" 
-                                checked={audienceMethod === 'leads'} 
-                                onChange={() => setAudienceMethod('leads')} 
-                                className="text-primary focus:ring-primary"
+                        {audienceMethod === 'leads' && (
+                          <div className="mb-3">
+                            <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2 rounded border border-emerald-200">
+                              <input
+                                type="checkbox"
+                                checked={onlyVerifiedEmails}
+                                onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
+                                className="text-emerald-600 focus:ring-emerald-500 rounded"
                               />
-                              <span className="text-sm font-medium text-gray-700">CRM Leads</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input 
-                                type="radio" 
-                                name="newAudienceMethod" 
-                                value="upload" 
-                                checked={audienceMethod === 'upload'} 
-                                onChange={() => setAudienceMethod('upload')} 
-                                className="text-primary focus:ring-primary"
-                              />
-                              <span className="text-sm font-medium text-gray-700">Upload CSV</span>
+                              <span className="text-sm font-medium text-emerald-800">Only send to Verified Emails</span>
                             </label>
                           </div>
+                        )}
 
-                          {audienceMethod === 'leads' && (
-                            <div className="mb-3">
-                              <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2 rounded border border-emerald-200">
-                                <input 
-                                  type="checkbox" 
-                                  checked={onlyVerifiedEmails}
-                                  onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
-                                  className="text-emerald-600 focus:ring-emerald-500 rounded"
-                                />
-                                <span className="text-sm font-medium text-emerald-800">Only send to Verified Emails</span>
-                              </label>
-                            </div>
-                          )}
-
-                          {audienceMethod === 'leads' ? (
-                            <div className="space-y-2 max-h-40 overflow-y-auto bg-white p-2 border border-gray-200 rounded">
-                              {industryGroups.length === 0 ? (
-                                <p className="text-xs text-gray-500 italic">No leads found. Discover leads first.</p>
-                              ) : (
-                                industryGroups.map(group => (
-                                  <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden mb-1">
-                                    <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
-                                      <input 
-                                        type="checkbox"
-                                        checked={selectedIndustries.has(group.industry)}
-                                        onChange={() => toggleIndustrySelection(group.industry, group.leads)}
-                                        className="w-3.5 h-3.5 mr-2 text-primary focus:ring-primary rounded border-gray-300 cursor-pointer"
-                                      />
-                                      <div 
-                                        className="flex justify-between flex-1 cursor-pointer"
-                                        onClick={() => toggleIndustryExpanded(group.industry)}
-                                      >
-                                        <span className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
-                                          {expandedIndustries.has(group.industry) ? <ChevronDown className="w-3.5 h-3.5"/> : <ChevronRight className="w-3.5 h-3.5"/>}
-                                          {group.industry}
-                                        </span>
-                                        <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">{group.lead_count} leads</span>
-                                      </div>
+                        {audienceMethod === 'leads' ? (
+                          <div className="space-y-2 max-h-40 overflow-y-auto bg-white p-2 border border-gray-200 rounded">
+                            {industryGroups.length === 0 ? (
+                              <p className="text-xs text-gray-500 italic">No leads found. Discover leads first.</p>
+                            ) : (
+                              industryGroups.map(group => (
+                                <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden mb-1">
+                                  <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedIndustries.has(group.industry)}
+                                      onChange={() => toggleIndustrySelection(group.industry, group.leads)}
+                                      className="w-3.5 h-3.5 mr-2 text-primary focus:ring-primary rounded border-gray-300 cursor-pointer"
+                                    />
+                                    <div
+                                      className="flex justify-between flex-1 cursor-pointer"
+                                      onClick={() => toggleIndustryExpanded(group.industry)}
+                                    >
+                                      <span className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                                        {expandedIndustries.has(group.industry) ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                        {group.industry}
+                                      </span>
+                                      <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">{group.lead_count} leads</span>
                                     </div>
-                                    {expandedIndustries.has(group.industry) && (
-                                      <div className="bg-gray-50 p-1.5 border-t border-gray-200 pl-6 max-h-32 overflow-y-auto">
-                                        { (group.leads || []).map((lead: any, i: number) => (
-                                            <label key={i} className={`flex items-center p-1 hover:bg-white rounded transition-colors ${onlyVerifiedEmails && !lead.is_verified ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                                              <input 
-                                                type="checkbox"
-                                                checked={selectedLeadEmails.has(lead.email)}
-                                                onChange={() => { if (!onlyVerifiedEmails || lead.is_verified) toggleLeadSelection(lead.email) }}
-                                                disabled={onlyVerifiedEmails && !lead.is_verified}
-                                                className="w-3 h-3 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
-                                              />
-                                              <div className="flex flex-col ml-2">
-                                                <span className="text-xs font-medium text-gray-800 flex items-center gap-1">
-                                                  {lead.name}
-                                                  {lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded leading-none">✓ Verified</span>}
-                                                </span>
-                                                <span className="text-[10px] text-gray-500">{lead.email}</span>
-                                              </div>
-                                            </label>
-                                        ))}
-                                      </div>
-                                    )}
                                   </div>
-                                ))
-                              )}
-                            </div>
-                          ) : (
-                            <div className="bg-white p-3 rounded border border-gray-200 border-dashed text-center">
-                              <input 
-                                type="file" 
-                                accept=".csv"
-                                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                                className="block w-full text-xs text-gray-500 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
-                              />
-                              {uploadFile && <p className="text-xs text-green-600 mt-1">Ready: {uploadFile.name}</p>}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="flex gap-4">
-                        <button 
-                          onClick={handleSaveDraft}
-                          disabled={isSavingDraft || isPublishing}
-                          className="w-1/3 bg-white border border-[#F2DED6] hover:bg-gray-50 text-gray-900 font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                          {isSavingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                          {isSavingDraft ? 'Saving...' : 'Save Draft'}
-                        </button>
-
-                        <button 
-                          onClick={handlePublish}
-                          disabled={isPublishing || isSavingDraft || (campaignType === 'email' && audienceMethod === 'leads' && selectedLeadEmails.size === 0) || (campaignType === 'email' && audienceMethod === 'upload' && !uploadFile)}
-                          className="w-2/3 bg-green-600 hover:bg-green-700 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                          {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                          {isPublishing ? 'Publishing...' : `Publish to ${campaignType.charAt(0).toUpperCase() + campaignType.slice(1)}`}
-                        </button>
+                                  {expandedIndustries.has(group.industry) && (
+                                    <div className="bg-gray-50 p-1.5 border-t border-gray-200 pl-6 max-h-32 overflow-y-auto">
+                                      {(group.leads || []).map((lead: any, i: number) => (
+                                        <label key={i} className={`flex items-center p-1 hover:bg-white rounded transition-colors ${onlyVerifiedEmails && !lead.is_verified ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                          <input
+                                            type="checkbox"
+                                            checked={selectedLeadEmails.has(lead.email)}
+                                            onChange={() => { if (!onlyVerifiedEmails || lead.is_verified) toggleLeadSelection(lead.email) }}
+                                            disabled={onlyVerifiedEmails && !lead.is_verified}
+                                            className="w-3 h-3 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
+                                          />
+                                          <div className="flex flex-col ml-2">
+                                            <span className="text-xs font-medium text-gray-800 flex items-center gap-1">
+                                              {lead.name}
+                                              {lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded leading-none">✓ Verified</span>}
+                                            </span>
+                                            <span className="text-[10px] text-gray-500">{lead.email}</span>
+                                          </div>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        ) : (
+                          <div className="bg-white p-3 rounded border border-gray-200 border-dashed text-center">
+                            <input
+                              type="file"
+                              accept=".csv"
+                              onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                              className="block w-full text-xs text-gray-500 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
+                            />
+                            {uploadFile && <p className="text-xs text-green-600 mt-1">Ready: {uploadFile.name}</p>}
+                          </div>
+                        )}
                       </div>
+                    )}
+
+                    <div className="flex gap-4">
+                      <button
+                        onClick={handleSaveDraft}
+                        disabled={isSavingDraft || isPublishing}
+                        className="w-1/3 bg-white border border-[#F2DED6] hover:bg-gray-50 text-gray-900 font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isSavingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                        {isSavingDraft ? 'Saving...' : 'Save Draft'}
+                      </button>
+
+                      <button
+                        onClick={handlePublish}
+                        disabled={isPublishing || isSavingDraft || (campaignType === 'email' && audienceMethod === 'leads' && selectedLeadEmails.size === 0) || (campaignType === 'email' && audienceMethod === 'upload' && !uploadFile)}
+                        className="w-2/3 bg-green-600 hover:bg-green-700 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        {isPublishing ? 'Publishing...' : `Publish to ${campaignType.charAt(0).toUpperCase() + campaignType.slice(1)}`}
+                      </button>
                     </div>
-                  )}
+                  </div>
+                )}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -883,7 +1134,7 @@ export default function Campaigns() {
                   {viewingCampaign.content || "No additional content details available for this older campaign."}
                 </div>
               </div>
-              
+
               {viewingCampaign.image_url && (
                 <div>
                   <h3 className="text-sm font-semibold text-gray-900 mb-2">Attached Image</h3>
@@ -895,26 +1146,26 @@ export default function Campaigns() {
               {viewingCampaign.type?.toLowerCase() === 'email' && (
                 <div className="border-t border-gray-100 pt-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Send Campaign</h3>
-                  
+
                   <div className="flex gap-4 mb-4">
                     <label className="flex items-center gap-2 cursor-pointer">
-                      <input 
-                        type="radio" 
-                        name="audienceMethod" 
-                        value="leads" 
-                        checked={audienceMethod === 'leads'} 
-                        onChange={() => setAudienceMethod('leads')} 
+                      <input
+                        type="radio"
+                        name="audienceMethod"
+                        value="leads"
+                        checked={audienceMethod === 'leads'}
+                        onChange={() => setAudienceMethod('leads')}
                         className="text-primary focus:ring-primary"
                       />
                       <span className="text-sm font-medium text-gray-700">Select from CRM Leads</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
-                      <input 
-                        type="radio" 
-                        name="audienceMethod" 
-                        value="upload" 
-                        checked={audienceMethod === 'upload'} 
-                        onChange={() => setAudienceMethod('upload')} 
+                      <input
+                        type="radio"
+                        name="audienceMethod"
+                        value="upload"
+                        checked={audienceMethod === 'upload'}
+                        onChange={() => setAudienceMethod('upload')}
                         className="text-primary focus:ring-primary"
                       />
                       <span className="text-sm font-medium text-gray-700">Upload CSV Contacts</span>
@@ -924,8 +1175,8 @@ export default function Campaigns() {
                   {audienceMethod === 'leads' && (
                     <div className="mb-4">
                       <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
-                        <input 
-                          type="checkbox" 
+                        <input
+                          type="checkbox"
                           checked={onlyVerifiedEmails}
                           onChange={(e) => setOnlyVerifiedEmails(e.target.checked)}
                           className="text-emerald-600 focus:ring-emerald-500 rounded"
@@ -944,18 +1195,18 @@ export default function Campaigns() {
                         industryGroups.map(group => (
                           <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden">
                             <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
-                              <input 
+                              <input
                                 type="checkbox"
                                 checked={selectedIndustries.has(group.industry)}
                                 onChange={() => toggleIndustrySelection(group.industry, group.leads)}
                                 className="w-4 h-4 mr-3 text-primary focus:ring-primary rounded border-gray-300 cursor-pointer"
                               />
-                              <div 
+                              <div
                                 className="flex justify-between flex-1 cursor-pointer"
                                 onClick={() => toggleIndustryExpanded(group.industry)}
                               >
                                 <span className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                                  {expandedIndustries.has(group.industry) ? <ChevronDown className="w-4 h-4"/> : <ChevronRight className="w-4 h-4"/>}
+                                  {expandedIndustries.has(group.industry) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                                   {group.industry}
                                 </span>
                                 <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">{group.lead_count} leads</span>
@@ -963,9 +1214,9 @@ export default function Campaigns() {
                             </div>
                             {expandedIndustries.has(group.industry) && (
                               <div className="bg-gray-50 p-2 border-t border-gray-200 pl-8 max-h-40 overflow-y-auto">
-                                { (group.leads || []).map((lead: any, i: number) => (
+                                {(group.leads || []).map((lead: any, i: number) => (
                                   <label key={i} className={`flex items-center p-1.5 hover:bg-white rounded transition-colors ${onlyVerifiedEmails && !lead.is_verified ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                                    <input 
+                                    <input
                                       type="checkbox"
                                       checked={selectedLeadEmails.has(lead.email)}
                                       onChange={() => { if (!onlyVerifiedEmails || lead.is_verified) toggleLeadSelection(lead.email) }}
@@ -991,8 +1242,8 @@ export default function Campaigns() {
                     <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 border-dashed text-center">
                       <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
                       <p className="text-sm text-gray-600 mb-2">Upload a CSV file containing Name and Email columns.</p>
-                      <input 
-                        type="file" 
+                      <input
+                        type="file"
                         accept=".csv"
                         onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                         className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer mx-auto max-w-xs"

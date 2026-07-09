@@ -73,3 +73,81 @@ async def save_integration_token(user_id: str, platform: str, token_data: dict):
     except Exception as e:
         logger.error(f"Failed to save token to MongoDB: {e}")
         return False
+
+
+# ── Call Logs (Voice Campaigns) ───────────────────────────────────────────────
+
+async def save_call_log(call_data: dict):
+    """Save an individual call log record to the call_logs collection."""
+    if db is None:
+        logger.warning("MongoDB is not connected. Call log will not be saved.")
+        return None
+    try:
+        result = await db.call_logs.insert_one(call_data)
+        logger.info(f"Saved call log: {result.inserted_id}")
+        return str(result.inserted_id)
+    except Exception as e:
+        logger.error(f"Failed to save call log: {e}")
+        return None
+
+
+async def update_call_log(call_id: str, update_data: dict):
+    """Update a call log by VAPI call_id."""
+    if db is None:
+        return False
+    try:
+        result = await db.call_logs.update_one(
+            {"call_id": call_id},
+            {"$set": update_data}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        logger.error(f"Failed to update call log {call_id}: {e}")
+        return False
+
+
+async def get_call_logs(user_id: str, campaign_id: str = None, limit: int = 100):
+    """Retrieve call logs for a user, optionally filtered by campaign."""
+    if db is None:
+        return []
+    try:
+        query = {"user_id": user_id}
+        if campaign_id:
+            query["campaign_id"] = campaign_id
+        cursor = db.call_logs.find(query).sort("created_at", -1).limit(limit)
+        logs = await cursor.to_list(length=limit)
+        for log in logs:
+            log["id"] = str(log["_id"])
+            del log["_id"]
+        return logs
+    except Exception as e:
+        logger.error(f"Failed to get call logs: {e}")
+        return []
+
+
+async def get_call_stats(user_id: str) -> dict:
+    """Get aggregated call statistics for a user's dashboard."""
+    if db is None:
+        return {"total_calls": 0, "total_duration": 0, "meetings_booked": 0, "sentiments": {}}
+    try:
+        pipeline = [
+            {"$match": {"user_id": user_id}},
+            {"$group": {
+                "_id": None,
+                "total_calls": {"$sum": 1},
+                "total_duration": {"$sum": {"$ifNull": ["$duration", 0]}},
+                "meetings_booked": {
+                    "$sum": {"$cond": [{"$eq": ["$sentiment", "Positive"]}, 1, 0]}
+                },
+            }},
+        ]
+        result = await db.call_logs.aggregate(pipeline).to_list(length=1)
+        if result:
+            stats = result[0]
+            del stats["_id"]
+            return stats
+        return {"total_calls": 0, "total_duration": 0, "meetings_booked": 0}
+    except Exception as e:
+        logger.error(f"Failed to get call stats: {e}")
+        return {"total_calls": 0, "total_duration": 0, "meetings_booked": 0}
+
