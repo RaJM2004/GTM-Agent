@@ -4,7 +4,7 @@ Main entry point for the FastAPI application.
 """
 
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -87,8 +87,16 @@ def health_check():
             "search_engine": "duckduckgo (keyless)",
             "google_maps": "configured" if settings.GOOGLE_MAPS_API_KEY else "not_configured",
             "apollo": "configured" if settings.APOLLO_API_KEY else "not_configured",
+            "vapi": "configured" if settings.VAPI_API_KEY else "not_configured",
         }
     }
+
+# Root-level webhook alias for VAPI (ngrok URL points here)
+@app.post("/vapi-webhook")
+async def vapi_webhook_root(request: Request):
+    """Root-level VAPI webhook — forwards to the campaigns voice webhook handler."""
+    from api.campaigns import voice_webhook
+    return await voice_webhook(request)
 
 if __name__ == "__main__":
     import uvicorn

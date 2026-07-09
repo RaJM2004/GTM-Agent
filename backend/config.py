@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     HF_TOKEN: str = os.getenv("HF_TOKEN", "")
 
+    # VAPI Voice AI Config
+    VAPI_API_KEY: str = os.getenv("VAPI_API_KEY", "")
+    VAPI_ASSISTANT_ID: str = os.getenv("VAPI_ASSISTANT_ID", "")
+    VAPI_WEBHOOK_URL: str = os.getenv("VAPI_WEBHOOK_URL", "")
+
     # Email Verification (Reacher - self-hosted via Docker)
     REACHER_API_URL: str = os.getenv("REACHER_API_URL", "http://localhost:8080")
     

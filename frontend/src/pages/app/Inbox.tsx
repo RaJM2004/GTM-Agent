@@ -1,17 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { 
-  Search, 
-  Mail, 
-  Filter, 
-  Star, 
-  Clock, 
-  MoreVertical, 
-  Reply, 
-  Send, 
-  Paperclip, 
-  Loader2, 
-  AlertTriangle, 
+import {
+  Search,
+  Mail,
+  Filter,
+  Star,
+  Clock,
+  MoreVertical,
+  Reply,
+  Send,
+  Paperclip,
+  Loader2,
+  AlertTriangle,
   Plug,
   Inbox as InboxIcon,
   RefreshCw
@@ -21,7 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function Inbox() {
   const { user } = useAuth();
-  
+
   const [activeTab, setActiveTab] = useState('All');
   const [folder, setFolder] = useState<'inbox' | 'sent'>('inbox');
   const [threads, setThreads] = useState<any[]>([]);
@@ -29,7 +29,7 @@ export default function Inbox() {
   const [connected, setConnected] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [replyText, setReplyText] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -39,7 +39,7 @@ export default function Inbox() {
       setLoading(true);
       setError(null);
       const res = await apiFetch(`/api/integrations/email/messages?folder=${folder}`);
-      
+
       if (res.success) {
         setConnected(res.connected);
         const emailThreads = res.emails || [];
@@ -79,19 +79,19 @@ export default function Inbox() {
 
   // Filter threads based on Search and Tabs
   const filteredThreads = threads.filter(thread => {
-    const matchesSearch = 
+    const matchesSearch =
       thread.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       thread.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
       thread.preview.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
     if (!matchesSearch) return false;
-    
+
     if (activeTab === 'Unread') return thread.unread;
     if (activeTab === 'Emails') return thread.channel === 'email';
     // Channels like linkedin/calls will not have items if email integration is the only provider
     if (activeTab === 'LinkedIn') return thread.channel === 'linkedin';
     if (activeTab === 'Calls') return thread.channel === 'call';
-    
+
     return true;
   });
 
@@ -104,8 +104,8 @@ export default function Inbox() {
           <p className="text-sm text-gray-500">Manage your connected outreach channels in real-time.</p>
         </div>
         <div className="flex gap-2">
-          <button 
-            onClick={fetchInbox} 
+          <button
+            onClick={fetchInbox}
             disabled={loading}
             className="p-2 bg-white border border-[#F2DED6] text-gray-700 rounded-lg hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-50"
             title="Refresh Inbox"
@@ -134,8 +134,8 @@ export default function Inbox() {
           <p className="text-gray-600 max-w-md mb-8 leading-relaxed">
             Hey <span className="font-semibold text-gray-800">{user?.name || 'Raj Mange'}</span>, you haven't connected an email inbox yet. Link your Google Workspace, Microsoft Outlook, or Custom SMTP/IMAP server to view and reply to emails here in real-time.
           </p>
-          <Link 
-            to="/app/integrations" 
+          <Link
+            to="/app/integrations"
             className="flex items-center gap-2 px-6 py-3 border border-transparent rounded-xl shadow-[0_4px_14px_0_rgba(221,138,115,0.39)] text-sm font-bold text-white bg-primary hover:bg-primary/90 transition-all hover:-translate-y-0.5"
           >
             Connect Email in Integrations
@@ -144,7 +144,7 @@ export default function Inbox() {
       ) : (
         // Connected State
         <div className="flex flex-1 overflow-hidden bg-[#FAF9F6]">
-          
+
           {/* Left Panel: Thread List */}
           <div className="w-full md:w-[350px] lg:w-[400px] border-r border-[#F2DED6] bg-white flex flex-col shrink-0">
             <div className="p-4 border-b border-[#F2DED6] space-y-4">
@@ -164,17 +164,15 @@ export default function Inbox() {
                 <div className="flex bg-[#FDF8F5] border border-[#F2DED6] rounded-lg p-0.5 mr-2">
                   <button
                     onClick={() => setFolder('inbox')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      folder === 'inbox' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${folder === 'inbox' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                      }`}
                   >
                     Inbox
                   </button>
                   <button
                     onClick={() => setFolder('sent')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                      folder === 'sent' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${folder === 'sent' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                      }`}
                   >
                     Sent
                   </button>
@@ -183,11 +181,10 @@ export default function Inbox() {
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap transition-colors ${
-                      activeTab === tab 
-                        ? 'bg-primary text-white shadow-sm' 
+                    className={`px-3 py-1.5 text-xs font-medium rounded-full whitespace-nowrap transition-colors ${activeTab === tab
+                        ? 'bg-primary text-white shadow-sm'
                         : 'bg-white text-gray-600 border border-[#F2DED6] hover:bg-gray-50'
-                    }`}
+                      }`}
                   >
                     {tab}
                   </button>
@@ -200,7 +197,7 @@ export default function Inbox() {
               <div className="p-4 bg-red-50 border-b border-red-100 flex items-start gap-2.5 text-xs text-red-800 font-medium">
                 <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  {error} <br/>
+                  {error} <br />
                   <Link to="/app/integrations" className="underline text-primary font-bold">Check Credentials</Link>
                 </div>
               </div>
@@ -215,34 +212,34 @@ export default function Inbox() {
                 </div>
               ) : (
                 filteredThreads.map((thread) => (
-                  <div 
-                    key={thread.id} 
+                  <div
+                    key={thread.id}
                     onClick={() => setSelectedThread(thread)}
                     className={`p-4 border-b border-[#F2DED6]/50 cursor-pointer hover:bg-[#FDF8F5] transition-colors relative ${selectedThread?.id === thread.id ? 'bg-[#FDF8F5]' : ''}`}
                   >
                     {selectedThread?.id === thread.id && (
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-r-full"></div>
                     )}
-                      <div className="flex justify-between items-start mb-1">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <span className="p-1.5 rounded-md bg-blue-50 text-blue-500">
-                              <Mail className="w-3.5 h-3.5" />
-                            </span>
-                            <span className={`font-semibold text-sm truncate max-w-[150px] ${thread.unread ? 'text-gray-900' : 'text-gray-700'}`}>
-                              {thread.name}
-                            </span>
-                          </div>
-                          {thread.lead_status && (
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full self-start ${thread.lead_status === 'Positive' ? 'bg-green-100 text-green-700' : thread.lead_status === 'Negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
-                              {thread.lead_status} Lead
-                            </span>
-                          )}
+                    <div className="flex justify-between items-start mb-1">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="p-1.5 rounded-md bg-blue-50 text-blue-500">
+                            <Mail className="w-3.5 h-3.5" />
+                          </span>
+                          <span className={`font-semibold text-sm truncate max-w-[150px] ${thread.unread ? 'text-gray-900' : 'text-gray-700'}`}>
+                            {thread.name}
+                          </span>
                         </div>
-                        <span className={`text-[10px] shrink-0 ${thread.unread ? 'text-primary font-bold' : 'text-gray-400'}`}>
-                          {thread.time}
-                        </span>
+                        {thread.lead_status && (
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full self-start ${thread.lead_status === 'Positive' ? 'bg-green-100 text-green-700' : thread.lead_status === 'Negative' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
+                            {thread.lead_status} Lead
+                          </span>
+                        )}
                       </div>
+                      <span className={`text-[10px] shrink-0 ${thread.unread ? 'text-primary font-bold' : 'text-gray-400'}`}>
+                        {thread.time}
+                      </span>
+                    </div>
                     <div className="pl-8">
                       <p className="text-xs font-semibold text-gray-900 mb-0.5 truncate">{thread.subject}</p>
                       <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{thread.preview}</p>
@@ -293,13 +290,13 @@ export default function Inbox() {
                 <div className="flex-1 overflow-y-auto p-6 bg-[#FAF9F6]/30">
                   <div className="max-w-3xl mx-auto space-y-6">
                     <h3 className="text-lg font-semibold text-gray-900 border-b pb-2 border-gray-100">{selectedThread.subject}</h3>
-                    
+
                     <div className="bg-[#FDF8F5] border border-[#F2DED6]/50 rounded-xl p-6 shadow-sm">
                       <div className="flex justify-between items-center mb-4 pb-3 border-b border-[#F2DED6]/30">
                         <span className="text-sm font-semibold text-gray-800">{selectedThread.name}</span>
                         <span className="text-xs text-gray-500">{selectedThread.time}</span>
                       </div>
-                      <div 
+                      <div
                         className="text-sm text-gray-700 leading-relaxed font-sans prose prose-sm max-w-none"
                         dangerouslySetInnerHTML={{ __html: selectedThread.body || selectedThread.preview }}
                       />
@@ -311,8 +308,8 @@ export default function Inbox() {
                 <div className="p-4 border-t border-[#F2DED6] bg-[#f8f9fa]">
                   <div className="max-w-3xl mx-auto">
                     <div className="bg-white border border-[#F2DED6] rounded-xl overflow-hidden shadow-sm focus-within:ring-1 focus-within:ring-primary focus-within:border-primary transition-all">
-                      <textarea 
-                        rows={4} 
+                      <textarea
+                        rows={4}
                         value={replyText}
                         onChange={(e) => setReplyText(e.target.value)}
                         placeholder={`Reply to ${selectedThread.name}...`}
@@ -323,7 +320,7 @@ export default function Inbox() {
                           <button className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"><Paperclip className="w-4 h-4" /></button>
                           <button className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"><Reply className="w-4 h-4" /></button>
                         </div>
-                        <button 
+                        <button
                           onClick={handleSendReply}
                           disabled={isSending || !replyText.trim()}
                           className="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm font-medium rounded-lg transition-colors shadow-sm gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
