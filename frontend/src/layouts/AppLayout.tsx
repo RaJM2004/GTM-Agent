@@ -18,8 +18,10 @@ import {
   Hourglass,
   User as UserIcon,
   Contact,
-  Coins
+  Coins,
+  ShieldAlert
 } from 'lucide-react';
+import NotificationBell from '../components/NotificationBell';
 
 const navigation = [
   { name: 'Dashboard', href: '/app', icon: LayoutDashboard },
@@ -86,6 +88,8 @@ export default function AppLayout() {
             <Coins className="w-4 h-4 text-yellow-600" />
             <span className="text-yellow-700 font-bold">{user?.token_balance?.toLocaleString() || 0}</span>
           </div>
+          <div className="hidden md:block w-px h-4 bg-[#EBD3C9]"></div>
+          <NotificationBell />
           <div className="flex items-center gap-2.5 bg-primary/10 px-3.5 py-1.5 rounded-full text-primary font-semibold cursor-pointer hover:bg-primary/20 transition-all border border-primary/20" title={`Logged in via: ${user?.auth_provider || 'email'}`}>
             <UserIcon className="w-4 h-4 shrink-0" />
             <span className="max-w-[130px] truncate">{user?.name || 'Sales Leader'}</span>
@@ -132,6 +136,36 @@ export default function AppLayout() {
             </div>
             
             <div className="space-y-1 pb-4">
+              {user?.role === 'admin' && (
+                <div className="mb-4">
+                  <div className="px-6 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    Admin Panel
+                  </div>
+                  <Link
+                    to="/app/admin/users"
+                    className={`flex items-center px-6 py-3 text-sm font-medium transition-colors ${
+                      location.pathname.includes('/admin/users')
+                        ? 'theme-active-item border-r-4 border-primary'
+                        : 'theme-inactive-item hover:bg-[#F2DED6]'
+                    }`}
+                  >
+                    <ShieldAlert className={`w-5 h-5 mr-3 ${location.pathname.includes('/admin/users') ? 'text-primary' : 'text-gray-500'}`} />
+                    User Management
+                  </Link>
+                  <Link
+                    to="/app/admin/vapi-assistants"
+                    className={`flex items-center px-6 py-3 text-sm font-medium transition-colors ${
+                      location.pathname.includes('/admin/vapi-assistants')
+                        ? 'theme-active-item border-r-4 border-primary'
+                        : 'theme-inactive-item hover:bg-[#F2DED6]'
+                    }`}
+                  >
+                    <Phone className={`w-5 h-5 mr-3 ${location.pathname.includes('/admin/vapi-assistants') ? 'text-primary' : 'text-gray-500'}`} />
+                    Vapi Inventory
+                  </Link>
+                </div>
+              )}
+              
               <Link
                 to="/app/settings"
                 className={`flex items-center px-6 py-3 text-sm font-medium transition-colors ${

@@ -17,9 +17,13 @@ import Calls from './pages/app/Calls';
 import Analytics from './pages/app/Analytics';
 import Billing from './pages/app/Billing';
 import Settings from './pages/app/Settings';
+import AdminUsers from './pages/app/admin/Users';
+import AdminVapiInventory from './pages/app/admin/VapiInventory';
 
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
+import AdminRoute from './components/AdminRoute';
+
 
 function App() {
   return (
@@ -52,6 +56,10 @@ function App() {
             <Route path="analytics" element={<Analytics />} />
             <Route path="billing" element={<Billing />} />
             <Route path="settings" element={<Settings />} />
+            
+            {/* Admin Routes */}
+            <Route path="admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
+            <Route path="admin/vapi-assistants" element={<AdminRoute><AdminVapiInventory /></AdminRoute>} />
           </Route>
         </Routes>
       </Router>

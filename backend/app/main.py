@@ -16,8 +16,14 @@ from api.contacts import router as contacts_router
 from api.auth import router as auth_router
 from api.dashboard import router as dashboard_router
 from api.payments import router as payments_router
+from api.admin import router as admin_router
+from api.notifications import router as notifications_router
 from database import connect_to_mongo, close_mongo_connection
 from fastapi.staticfiles import StaticFiles
+from middlewares.audit_logger import AuditLoggerMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from services.background_poller import background_email_poller
 import asyncio
@@ -49,6 +55,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Rate Limiter (slowapi)
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -58,6 +69,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Audit Logger Middleware (additive — does not change response behaviour)
+app.add_middleware(AuditLoggerMiddleware)
 
 # Mount static files for images
 import os
@@ -74,6 +88,8 @@ app.include_router(leads_router)
 app.include_router(contacts_router)
 app.include_router(dashboard_router)
 app.include_router(payments_router)
+app.include_router(admin_router)
+app.include_router(notifications_router)
 
 @app.get("/")
 def read_root():

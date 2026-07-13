@@ -8,6 +8,10 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Response, Request, HTTPException, status, Depends
 from typing import List
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 from schemas.auth import (
     UserRegister,
@@ -143,7 +147,8 @@ async def register(user_data: UserRegister, response: Response):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(credentials: UserLogin, response: Response):
+@limiter.limit("10/minute")
+async def login(credentials: UserLogin, response: Response, request: Request):
     """
     Log in an existing user.
     Verifies credentials and sets HTTP-only cookies.
@@ -369,7 +374,8 @@ async def logout(response: Response):
 
 
 @router.post("/forgot-password")
-async def forgot_password(req: ForgotPasswordRequest):
+@limiter.limit("5/minute")
+async def forgot_password(req: ForgotPasswordRequest, request: Request):
     """
     Request a password reset link.
     Generates a token and logs the reset link for local development.

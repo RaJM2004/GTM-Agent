@@ -362,6 +362,14 @@ async def publish_linkedin_campaign(req: PublishRequest):
             "action": req.action
         }
         await db.campaigns.insert_one(new_campaign)
+        
+        from services.notifications import create_notification
+        await create_notification(
+            user_id=req.user_id,
+            title="Campaign Published",
+            message=f"LinkedIn campaign '{new_campaign['name']}' has been published.",
+            notif_type="success"
+        )
 
     return {"status": "success", "message": "Successfully published directly to your live LinkedIn account (with image)!"}
 
@@ -661,6 +669,14 @@ async def publish_email_campaign(req: EmailPublishRequest):
     except Exception as e:
         logger.error(f"Failed to backfill campaign_id in emails collection: {e}")
 
+    from services.notifications import create_notification
+    await create_notification(
+        user_id=req.user_id,
+        title="Campaign Completed",
+        message=f"Email campaign '{req.name}' successfully sent to {successful_sends} contacts.",
+        notif_type="success"
+    )
+
     return {"status": "success", "message": f"Successfully published and sent email campaign to {successful_sends} contacts!"}
 
 async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str = None, campaign_id: str = None) -> int:
@@ -817,6 +833,14 @@ async def publish_sms_campaign(req: SmsPublishRequest):
     await db.sms_logs.update_many(
         {"user_id": req.user_id, "campaign_id": None, "lead_phone": {"$in": lead_phones}},
         {"$set": {"campaign_id": campaign_id_str}}
+    )
+    
+    from services.notifications import create_notification
+    await create_notification(
+        user_id=req.user_id,
+        title="Campaign Completed",
+        message=f"SMS campaign '{req.name}' successfully sent to {successful_sends} contacts.",
+        notif_type="success"
     )
     
     return {"status": "success", "message": f"Successfully published and sent SMS campaign to {successful_sends} contacts!"}
@@ -1070,6 +1094,14 @@ async def publish_voice_campaign(req: VoicePublishRequest):
             logger.error(f"Failed to finalize campaign: {e}")
         
         logger.info(f"[Voice Campaign {campaign_id}] Completed. {successful_calls}/{len(req.leads)} calls made.")
+        
+        from services.notifications import create_notification
+        await create_notification(
+            user_id=req.user_id,
+            title="Campaign Completed",
+            message=f"Voice campaign '{req.name}' completed. {successful_calls} calls made.",
+            notif_type="success"
+        )
     
     # Fire and forget the background task
     asyncio.create_task(_run_voice_campaign())

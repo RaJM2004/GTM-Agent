@@ -4,6 +4,7 @@ import time
 import database
 from services.email_fetcher import refresh_gmail_token, fetch_emails_via_gmail_api, fetch_real_emails
 from api.integrations import _process_incoming_emails
+from services.notifications import create_notification
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,14 @@ async def background_email_poller():
                                 )
                         
                         emails = await fetch_emails_via_gmail_api(access_token, folder="inbox")
-                        await _process_incoming_emails(emails, user_id)
+                        new_replies = await _process_incoming_emails(emails, user_id)
+                        if new_replies and len(new_replies) > 0:
+                            await create_notification(
+                                user_id=user_id,
+                                title="New Email Replies",
+                                message=f"You have {len(new_replies)} new reply(s) from your campaign leads.",
+                                notif_type="info"
+                            )
                     else:
                         # Standard IMAP
                         emails = await fetch_real_emails(
