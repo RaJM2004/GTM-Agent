@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, Bot, Target, Zap, BarChart, Users, MessageSquare, PhoneCall, Hourglass } from 'lucide-react';
+import { ArrowRight, Bot, Target, Zap, BarChart, Users, MessageSquare, PhoneCall, Hourglass, CheckCircle2 } from 'lucide-react';
 
 export default function LandingPage() {
   const placeholders = [
@@ -152,6 +152,64 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Pricing Section */}
+      <section id="pricing" className="py-24 bg-white relative">
+        <div className="container mx-auto px-6 max-w-6xl">
+          <div className="text-center mb-16">
+            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-50 border border-orange-200 text-orange-600 text-sm font-semibold mb-6 shadow-sm">
+              <Zap className="w-4 h-4" /> 14-Day Free Trial
+            </span>
+            <h2 className="text-3xl md:text-5xl font-bold text-gray-900 mb-6">Pay only for what you use</h2>
+            <p className="text-gray-600 text-lg max-w-2xl mx-auto">
+              Start with 100,000 free tokens on our 14-day trial. After that, purchase tokens as you need them. No monthly subscriptions required.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+            {/* 1M Tokens */}
+            <div className="border-2 border-[#F2DED6] hover:border-primary transition-colors rounded-2xl p-8 bg-[#FAF9F6] relative group shadow-sm hover:shadow-md">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">1 Million Tokens</h3>
+              <p className="text-gray-600 mb-6">Perfect for solo founders and small campaigns.</p>
+              <div className="mb-8">
+                <span className="text-5xl font-black text-gray-900">₹1,000</span>
+              </div>
+              <ul className="space-y-4 mb-8 text-gray-600">
+                <li className="flex items-center gap-3"><CheckCircle2 className="w-5 h-5 text-primary" /> ~ 10,000 Emails / SMS</li>
+                <li className="flex items-center gap-3"><CheckCircle2 className="w-5 h-5 text-primary" /> ~ 1,600 LinkedIn Posts</li>
+                <li className="flex items-center gap-3"><CheckCircle2 className="w-5 h-5 text-primary" /> ~ 100 Voice Call Minutes</li>
+              </ul>
+              <Link to="/register" className="block w-full text-center bg-white border-2 border-[#F2DED6] group-hover:border-primary text-gray-900 font-bold py-3 rounded-xl transition-colors">
+                Get Started
+              </Link>
+            </div>
+
+            {/* 5M Tokens */}
+            <div className="border-2 border-primary rounded-2xl p-8 bg-[#FDF8F5] relative shadow-lg transform md:-translate-y-4">
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-primary text-white px-4 py-1 rounded-full text-sm font-bold shadow-sm">
+                MOST POPULAR (Save 20%)
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">5 Million Tokens</h3>
+              <p className="text-gray-600 mb-6">For scaling revenue teams and high-volume calling.</p>
+              <div className="mb-8">
+                <span className="text-5xl font-black text-gray-900">₹4,000</span>
+              </div>
+              <ul className="space-y-4 mb-8 text-gray-600">
+                <li className="flex items-center gap-3"><CheckCircle2 className="w-5 h-5 text-primary" /> ~ 50,000 Emails / SMS</li>
+                <li className="flex items-center gap-3"><CheckCircle2 className="w-5 h-5 text-primary" /> ~ 8,000 LinkedIn Posts</li>
+                <li className="flex items-center gap-3"><CheckCircle2 className="w-5 h-5 text-primary" /> ~ 500 Voice Call Minutes</li>
+              </ul>
+              <Link to="/register" className="block w-full text-center bg-primary hover:bg-primary/90 text-white font-bold py-3 rounded-xl transition-colors shadow-sm">
+                Get Started
+              </Link>
+            </div>
+          </div>
+          
+          <p className="text-center text-sm text-gray-500 mt-12 italic">
+            * Note: Voice calling features consume tokens at a higher rate (~10,000 tokens/minute) due to real-time AI processing costs.
+          </p>
         </div>
       </section>
 

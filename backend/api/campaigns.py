@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
 class ContentRequest(BaseModel):
+    user_id: str
     channel: str # linkedin, email, whatsapp, voice, sms
     objective: str # follow_up, engagement, product_launch, event_management
     action: str # post, dm
@@ -24,6 +25,7 @@ class ContentResponse(BaseModel):
     content: str
 
 class ImageRequest(BaseModel):
+    user_id: str
     content: str
 
 class ImageResponse(BaseModel):
@@ -132,6 +134,15 @@ async def generate_campaign_content(req: ContentRequest):
             response_format={"type": "json_object"}
         )
         
+        from services.billing import check_and_deduct_credits
+        prompt_tokens = getattr(response.usage, "prompt_tokens", 100)
+        completion_tokens = getattr(response.usage, "completion_tokens", 50)
+        tokens_used = (prompt_tokens * 1) + (completion_tokens * 3)
+        try:
+            await check_and_deduct_credits(req.user_id, "LLM_GENERATION", amount=tokens_used, dry_run=False)
+        except Exception:
+            pass # allow if no user context yet
+            
         raw_content = response.choices[0].message.content.strip()
         
         # Extract the 'message' from the JSON object to display in the frontend
@@ -169,6 +180,16 @@ async def generate_linkedin_image(req: ImageRequest):
             temperature=0.7,
             response_format={"type": "json_object"}
         )
+        
+        from services.billing import check_and_deduct_credits
+        prompt_tokens = getattr(response.usage, "prompt_tokens", 100)
+        completion_tokens = getattr(response.usage, "completion_tokens", 50)
+        tokens_used = (prompt_tokens * 1) + (completion_tokens * 3) + 500 # extra 500 for image generation
+        try:
+            await check_and_deduct_credits(req.user_id, "IMAGE_GENERATION", amount=tokens_used, dry_run=False)
+        except Exception:
+            pass
+            
         raw_content = response.choices[0].message.content.strip()
         
         # Parse the JSON and extract the image_prompt (<=20 words)
@@ -220,7 +241,7 @@ async def publish_linkedin_campaign(req: PublishRequest):
         raise HTTPException(status_code=500, detail="Database not connected")
         
     from services.billing import check_and_deduct_credits
-    await check_and_deduct_credits(req.user_id, "linkedin_posts", amount=1, dry_run=False)
+    await check_and_deduct_credits(req.user_id, "LINKEDIN_POST", amount=50.0, dry_run=False)
         
     # 1. Fetch the user's LinkedIn Token from MongoDB
     user = await db.users.find_one({"user_id": req.user_id})
@@ -452,8 +473,8 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
     from services.email_fetcher import refresh_gmail_token
     from services.billing import check_and_deduct_credits
     
-    # Pre-flight check: Make sure they have at least 1 email token
-    await check_and_deduct_credits(user_id, "emails_sent", amount=1, dry_run=True)
+    # Pre-flight check: Make sure they have at least enough tokens for emails
+    await check_and_deduct_credits(user_id, "EMAIL_SEND", amount=100.0, dry_run=True)
     
     # Pre-refresh Gmail token if needed
     if method.lower() == "gmail" and creds.get("auth_type") == "oauth":
@@ -489,7 +510,7 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
 
         # Use AI to perfectly craft the email for this specific lead
         personalized_content = await personalize_email_content(content, lead, sender_name)
-        await check_and_deduct_credits(user_id, "ai_personalizations", amount=1, dry_run=False)
+        await check_and_deduct_credits(user_id, "AI_PERSONALIZATION", amount=50.0, dry_run=False)
 
         send_result = None
         if method.lower() == "gmail":
@@ -513,7 +534,7 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
         # send_result is a dict: {"success": bool, "message_id": str|None}
         if send_result and send_result.get("success"):
             successful_sends += 1
-            await check_and_deduct_credits(user_id, "emails_sent", amount=1, dry_run=False)
+            await check_and_deduct_credits(user_id, "EMAIL_SEND", amount=100.0, dry_run=False)
 
             message_id = send_result.get("message_id")
 
@@ -642,7 +663,7 @@ async def publish_email_campaign(req: EmailPublishRequest):
 
     return {"status": "success", "message": f"Successfully published and sent email campaign to {successful_sends} contacts!"}
 
-async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str = None) -> int:
+async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str = None, campaign_id: str = None) -> int:
     from database import db
     from services.sms_sender import send_sms_via_twilio
     import os
@@ -664,7 +685,7 @@ async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str 
         
     successful_sends = 0
     from services.billing import check_and_deduct_credits
-    await check_and_deduct_credits(user_id, "sms_sent", amount=1, dry_run=True)
+    await check_and_deduct_credits(user_id, "SMS_SEND", amount=100.0, dry_run=True)
     
     for lead in leads:
         lead_phone = lead.get("phone")
@@ -696,11 +717,21 @@ async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str 
             
         if success:
             successful_sends += 1
-            await check_and_deduct_credits(user_id, "sms_sent", amount=1, dry_run=False)
+            await check_and_deduct_credits(user_id, "SMS_SEND", amount=100.0, dry_run=False)
             
             # Mark the lead as SMSed
             if db is not None:
                 try:
+                    import datetime
+                    await db.sms_logs.insert_one({
+                        "user_id": user_id,
+                        "campaign_id": campaign_id,
+                        "lead_phone": lead_phone,
+                        "lead_name": lead_name,
+                        "content": personalized_content,
+                        "status": "sent",
+                        "sent_at": datetime.datetime.utcnow()
+                    })
                     await db.leads.update_many(
                         {"phone": lead_phone, "user_id": user_id},
                         {"$set": {"sms_sent_via_gtm": True}}
@@ -719,7 +750,8 @@ async def send_sms_campaign(req: SmsSendRequest):
             user_id=req.user_id,
             leads=req.leads,
             content=req.content,
-            image_url=req.image_url
+            image_url=req.image_url,
+            campaign_id=req.campaign_id
         )
     except ValueError as e:
         return {"status": "error", "message": str(e)}
@@ -777,9 +809,30 @@ async def publish_sms_campaign(req: SmsPublishRequest):
         "audience": [{"name": l.get("name", ""), "contact": l.get("phone", "")} for l in req.leads]
     }
     
-    await db.campaigns.insert_one(new_campaign)
+    result = await db.campaigns.insert_one(new_campaign)
+    campaign_id_str = str(result.inserted_id)
+    
+    # Backfill campaign_id into all SMS records written during this dispatch
+    lead_phones = [l.get("phone") for l in req.leads if l.get("phone")]
+    await db.sms_logs.update_many(
+        {"user_id": req.user_id, "campaign_id": None, "lead_phone": {"$in": lead_phones}},
+        {"$set": {"campaign_id": campaign_id_str}}
+    )
     
     return {"status": "success", "message": f"Successfully published and sent SMS campaign to {successful_sends} contacts!"}
+
+@router.get("/sms/logs")
+async def get_sms_logs(campaign_id: str):
+    from database import db
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    logs = await db.sms_logs.find({"campaign_id": campaign_id}).sort("sent_at", -1).to_list(1000)
+    for log in logs:
+        log["id"] = str(log["_id"])
+        del log["_id"]
+        
+    return {"status": "success", "logs": logs}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -846,7 +899,7 @@ async def publish_voice_campaign(req: VoicePublishRequest):
     
     # 2. Check credits
     try:
-        await check_and_deduct_credits(req.user_id, "voice_calls", amount=1, dry_run=True)
+        await check_and_deduct_credits(req.user_id, "VOICE_CALL_MINUTE", amount=10000.0, dry_run=True)
     except Exception:
         pass  # Allow if billing not fully set up
     
@@ -981,7 +1034,7 @@ async def publish_voice_campaign(req: VoicePublishRequest):
             
             # Deduct credits
             try:
-                await check_and_deduct_credits(req.user_id, "voice_calls", amount=1, dry_run=False)
+                await check_and_deduct_credits(req.user_id, "VOICE_CALL_MINUTE", amount=10000.0, dry_run=False)
             except Exception:
                 pass
             

@@ -17,7 +17,8 @@ import {
   Menu,
   Hourglass,
   User as UserIcon,
-  Contact
+  Contact,
+  Coins
 } from 'lucide-react';
 
 const navigation = [
@@ -79,6 +80,11 @@ export default function AppLayout() {
           <div className="hidden md:block w-px h-4 bg-[#EBD3C9]"></div>
           <div className="hidden md:flex items-center gap-2 text-gray-600 font-mono">
             {time}
+          </div>
+          <div className="hidden md:block w-px h-4 bg-[#EBD3C9]"></div>
+          <div className="flex items-center gap-2 bg-yellow-100/50 px-3 py-1.5 rounded-full border border-yellow-200" title="Available Tokens">
+            <Coins className="w-4 h-4 text-yellow-600" />
+            <span className="text-yellow-700 font-bold">{user?.token_balance?.toLocaleString() || 0}</span>
           </div>
           <div className="flex items-center gap-2.5 bg-primary/10 px-3.5 py-1.5 rounded-full text-primary font-semibold cursor-pointer hover:bg-primary/20 transition-all border border-primary/20" title={`Logged in via: ${user?.auth_provider || 'email'}`}>
             <UserIcon className="w-4 h-4 shrink-0" />

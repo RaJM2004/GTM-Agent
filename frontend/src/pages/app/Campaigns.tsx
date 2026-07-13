@@ -45,6 +45,7 @@ export default function Campaigns() {
   const [isRefiningPrompt, setIsRefiningPrompt] = useState(false);
   const [sendFollowupSms, setSendFollowupSms] = useState(true);
   const [selectedLeadPhones, setSelectedLeadPhones] = useState<Set<string>>(new Set());
+  const [smsLogs, setSmsLogs] = useState<any[]>([]);
 
   const fetchCampaigns = async () => {
     try {
@@ -93,10 +94,30 @@ export default function Campaigns() {
   });
 
   useEffect(() => {
-    if (viewingCampaign && ['email', 'sms', 'call', 'voice'].includes(viewingCampaign.type?.toLowerCase())) {
-      fetchLeads();
+    if (viewingCampaign) {
+      const type = viewingCampaign.type?.toLowerCase();
+      if (['email', 'sms', 'call', 'voice'].includes(type)) {
+        fetchLeads();
+      }
+      if (type === 'sms' && viewingCampaign.status === 'Active') {
+        fetchSmsLogs(viewingCampaign.id);
+      } else {
+        setSmsLogs([]);
+      }
     }
   }, [viewingCampaign]);
+
+  const fetchSmsLogs = async (campaignId: string) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/campaigns/sms/logs?campaign_id=${campaignId}`);
+      const data = await res.json();
+      if (data.status === 'success') {
+        setSmsLogs(data.logs);
+      }
+    } catch (err) {
+      console.error('Failed to fetch SMS logs', err);
+    }
+  };
 
   useEffect(() => {
     if (showCreateModal && (campaignType === 'email' || campaignType === 'sms' || campaignType === 'voice')) {
@@ -161,7 +182,10 @@ export default function Campaigns() {
       const next = new Set(prev);
       const isCurrentlySelected = next.has(industry);
 
-      if (campaignType === 'sms') {
+      const activeType = viewingCampaign ? viewingCampaign.type?.toLowerCase() : campaignType;
+      const isSmsOrVoice = ['sms', 'voice', 'call'].includes(activeType);
+
+      if (isSmsOrVoice) {
         setSelectedLeadPhones(prevPhones => {
           const nextPhones = new Set(prevPhones);
           if (isCurrentlySelected) {
@@ -190,41 +214,103 @@ export default function Campaigns() {
     });
   };
 
-  const handleSendEmailCampaign = async () => {
+  const handleSendExistingCampaign = async () => {
     setIsSendingEmail(true);
     try {
+      const activeType = viewingCampaign.type?.toLowerCase();
+      const isSms = activeType === 'sms';
+      const isVoice = activeType === 'voice' || activeType === 'call';
+
       // Collect leads
       let collectedLeads: any[] = [];
       industryGroups.forEach(g => {
         g.leads.forEach((l: any) => {
-          if (selectedLeadEmails.has(l.email)) {
-            if (!onlyVerifiedEmails || l.is_verified) {
+          if (isSms || isVoice) {
+            if (l.phone && selectedLeadPhones.has(l.phone)) {
               collectedLeads.push(l);
+            }
+          } else {
+            if (l.email && selectedLeadEmails.has(l.email)) {
+              if (!onlyVerifiedEmails || l.is_verified) {
+                collectedLeads.push(l);
+              }
             }
           }
         });
       });
 
-      const res = await fetch('http://localhost:8000/api/campaigns/email/send', {
+      let endpoint = 'http://localhost:8000/api/campaigns/email/send';
+      let payload: any = {
+        campaign_id: viewingCampaign.id,
+        user_id: user?.user_id || "user_12345_john_doe",
+        subject: viewingCampaign.name,
+        content: viewingCampaign.content || "Email Content",
+        method: "leads",
+        leads: collectedLeads.map(l => ({ name: l.name, email: l.email }))
+      };
+
+      if (isSms) {
+        endpoint = 'http://localhost:8000/api/campaigns/sms/publish';
+        payload = {
+          action: 'post',
+          content: viewingCampaign.content || "SMS Content",
+          image_url: viewingCampaign.image_url || "",
+          user_id: user?.user_id || "user_12345_john_doe",
+          name: viewingCampaign.name || "SMS Campaign",
+          method: "leads",
+          leads: collectedLeads.map(l => ({ name: l.name, phone: l.phone }))
+        };
+      } else if (isVoice) {
+        endpoint = 'http://localhost:8000/api/campaigns/voice/publish';
+        payload = {
+          user_id: user?.user_id || "user_12345_john_doe",
+          name: viewingCampaign.name || 'Voice Campaign',
+          prompt: viewingCampaign.content || "",
+          first_message: 'Hello! Thanks for taking my call.',
+          leads: collectedLeads.map(l => ({ name: l.name, phone: l.phone })),
+          send_followup_sms: true,
+        };
+      }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          campaign_id: viewingCampaign.id,
-          user_id: user?.user_id || "user_12345_john_doe",
-          subject: viewingCampaign.name,
-          content: viewingCampaign.content || "Email Content",
-          method: "leads",
-          leads: collectedLeads.map(l => ({ name: l.name, email: l.email }))
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
-      alert(data.message);
+      if (!res.ok) {
+        if (res.status === 402) {
+          if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
+            window.location.href = '/app/billing';
+          }
+        } else {
+          alert("Error: " + (data.detail || data.message || "Failed to send campaign"));
+        }
+        setIsSendingEmail(false);
+        return;
+      }
+      
+      if (data.status === 'error') {
+        if (data.message && data.message.includes('Twilio')) {
+          if (window.confirm(data.message + "\n\nWould you like to go to the Integrations page to connect it now?")) {
+            window.location.href = '/app/integrations';
+            return;
+          }
+        } else {
+          alert("Error: " + data.message);
+        }
+      } else {
+        alert(data.message || 'Campaign sent successfully');
+      }
+
       setViewingCampaign(null);
       setSelectedIndustries(new Set());
       setSelectedLeadEmails(new Set());
+      setSelectedLeadPhones(new Set());
+      fetchCampaigns();
     } catch (err) {
       console.error(err);
-      alert('Failed to send email campaign');
+      alert('Failed to send campaign');
     }
     setIsSendingEmail(false);
   };
@@ -378,6 +464,17 @@ export default function Campaigns() {
           })
         });
         const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 402) {
+            if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
+              window.location.href = '/app/billing';
+            }
+          } else {
+            alert("Error: " + (data.detail || data.message || "Failed to publish"));
+          }
+          setIsPublishing(false);
+          return;
+        }
         alert(data.message);
       } else if (campaignType === 'sms') {
         let collectedLeads: any[] = [];
@@ -403,6 +500,17 @@ export default function Campaigns() {
           })
         });
         const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 402) {
+            if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
+              window.location.href = '/app/billing';
+            }
+          } else {
+            alert("Error: " + (data.detail || data.message || "Failed to publish"));
+          }
+          setIsPublishing(false);
+          return;
+        }
         if (data.status === 'error') {
           if (data.message && data.message.includes('Twilio')) {
             if (window.confirm(data.message + "\n\nWould you like to go to the Integrations page to connect it now?")) {
@@ -441,8 +549,21 @@ export default function Campaigns() {
           })
         });
         const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 402) {
+            if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
+              window.location.href = '/app/billing';
+            }
+          } else {
+            alert("Error: " + (data.detail || data.message || "Failed to publish"));
+          }
+          setIsPublishing(false);
+          return;
+        }
         if (data.status === 'error') {
           alert("Error: " + data.message);
+          setIsPublishing(false);
+          return;
         } else {
           alert(data.message);
         }
@@ -459,6 +580,17 @@ export default function Campaigns() {
           })
         });
         const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 402) {
+            if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
+              window.location.href = '/app/billing';
+            }
+          } else {
+            alert("Error: " + (data.detail || data.message || "Failed to publish"));
+          }
+          setIsPublishing(false);
+          return;
+        }
         alert(data.message);
       }
 
@@ -1141,6 +1273,47 @@ export default function Campaigns() {
                     )}
                   </>
                 )}
+                
+                {/* SMS Logs Section */}
+                {viewingCampaign && viewingCampaign.type?.toLowerCase() === 'sms' && viewingCampaign.status === 'Active' && (
+                  <div className="mt-8 border-t border-gray-100 pt-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                      <MessageCircle className="w-5 h-5 text-primary" />
+                      Sent Messages Log ({smsLogs.length})
+                    </h3>
+                    {smsLogs.length === 0 ? (
+                      <p className="text-sm text-gray-500 italic bg-gray-50 p-4 rounded-lg border border-gray-200">No messages have been sent yet.</p>
+                    ) : (
+                      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-h-96 overflow-y-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10">
+                            <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                              <th className="p-3">Recipient</th>
+                              <th className="p-3 w-1/2">Message Content</th>
+                              <th className="p-3">Sent At</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {smsLogs.map((log: any, idx: number) => (
+                              <tr key={idx} className="hover:bg-gray-50 text-sm align-top">
+                                <td className="p-3">
+                                  <div className="font-medium text-gray-900">{log.lead_name || 'Unknown'}</div>
+                                  <div className="text-gray-500 text-xs mt-0.5">{log.lead_phone}</div>
+                                </td>
+                                <td className="p-3 text-gray-700">
+                                  <div className="whitespace-pre-wrap text-xs bg-gray-50 border border-gray-100 p-2 rounded">{log.content}</div>
+                                </td>
+                                <td className="p-3 text-gray-500 text-xs whitespace-nowrap">
+                                  {new Date(log.sent_at).toLocaleString()}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1302,12 +1475,12 @@ export default function Campaigns() {
                     </div>
                   <div className="mt-6">
                     <button
-                      onClick={handleSendEmailCampaign}
-                      disabled={isSendingEmail || selectedLeadEmails.size === 0}
+                      onClick={handleSendExistingCampaign}
+                      disabled={isSendingEmail || (viewingCampaign.type?.toLowerCase() === 'sms' || viewingCampaign.type?.toLowerCase() === 'voice' || viewingCampaign.type?.toLowerCase() === 'call' ? selectedLeadPhones.size === 0 : selectedLeadEmails.size === 0)}
                       className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
                     >
                       {isSendingEmail ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                      {isSendingEmail ? 'Sending...' : 'Send Email Campaign'}
+                      {isSendingEmail ? 'Sending...' : `Send ${viewingCampaign.type || 'Email'} Campaign`}
                     </button>
                   </div>
                 </div>

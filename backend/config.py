@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
 
+    # Payment Gateway Config
+    CASHFREE_APP_ID: str = os.getenv("CASHFREE_APP_ID", "")
+    CASHFREE_SECRET_KEY: str = os.getenv("CASHFREE_SECRET_KEY", "")
+
     # Scraping Config
     MAX_CONCURRENT_REQUESTS: int = 10
     REQUEST_TIMEOUT: int = 15

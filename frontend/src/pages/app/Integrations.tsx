@@ -3,18 +3,12 @@ import { Search, CheckCircle2, Settings, Link2, ExternalLink, X, Loader2 } from 
 import { useAuth } from '../../context/AuthContext';
 
 const initialIntegrations = [
-  { id: 'openai', name: 'OpenAI', category: 'AI Models', desc: 'Power your agents with GPT-4', status: 'connected', logo: 'https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg' },
-  { id: 'gemini', name: 'Google Gemini', category: 'AI Models', desc: 'Use Gemini Pro for advanced reasoning', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg' },
   { id: 'twilio', name: 'Twilio', category: 'Communications', desc: 'SMS and Voice infrastructure', status: 'connected', logo: 'https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg' },
-  { id: 'vapi', name: 'VAPI', category: 'Communications', desc: 'Voice AI calling infrastructure', status: 'available', logo: 'https://vapi.ai/logo.svg' },
-  { id: 'apollo', name: 'Apollo.io', category: 'Data & Enrichment', desc: 'B2B contact database', status: 'connected', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/Apollo.io_logo.png/600px-Apollo.io_logo.png' },
-  { id: 'hunter', name: 'Hunter.io', category: 'Data & Enrichment', desc: 'Find professional email addresses', status: 'available', logo: 'https://hunter.io/assets/logo-b94ab9668bdcc7bc0c410ca3ad1741db.svg' },
   { id: 'linkedin', name: 'LinkedIn', category: 'Channels', desc: 'Automate LinkedIn outreach', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png' },
   { id: 'gmail', name: 'Google Workspace / Gmail', category: 'Channels', desc: 'Send and receive emails', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg' },
   { id: 'outlook', name: 'Microsoft Outlook', category: 'Channels', desc: 'Connect your Office 365 / Outlook account', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg' },
   { id: 'smtp', name: 'Custom SMTP', category: 'Channels', desc: 'Connect any email provider via SMTP credentials', status: 'available', logo: 'https://cdn-icons-png.flaticon.com/512/2950/2950689.png' },
   { id: 'whatsapp', name: 'WhatsApp Business', category: 'Channels', desc: 'WhatsApp API integration', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg' },
-  { id: 'stripe', name: 'Stripe', category: 'Billing', desc: 'Payment processing', status: 'connected', logo: 'https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg' },
 ];
 
 export default function Integrations() {

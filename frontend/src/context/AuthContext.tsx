@@ -8,6 +8,7 @@ export interface User {
   company: string;
   role: string;
   auth_provider: string;
+  token_balance?: number;
 }
 
 interface AuthContextType {

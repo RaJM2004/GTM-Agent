@@ -15,6 +15,7 @@ from api.leads import router as leads_router
 from api.contacts import router as contacts_router
 from api.auth import router as auth_router
 from api.dashboard import router as dashboard_router
+from api.payments import router as payments_router
 from database import connect_to_mongo, close_mongo_connection
 from fastapi.staticfiles import StaticFiles
 
@@ -72,6 +73,7 @@ app.include_router(integrations_router)
 app.include_router(leads_router)
 app.include_router(contacts_router)
 app.include_router(dashboard_router)
+app.include_router(payments_router)
 
 @app.get("/")
 def read_root():

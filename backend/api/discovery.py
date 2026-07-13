@@ -75,6 +75,8 @@ async def discover_leads(request: DiscoveryRequest):
             
         logger.info(f"[API] Discovery complete: {result.total_found} leads found")
         return result
+    except HTTPException as he:
+        raise he
     except ValueError as ve:
         logger.warning(f"[API] Discovery validation failed: {ve}")
         raise HTTPException(status_code=400, detail=str(ve))

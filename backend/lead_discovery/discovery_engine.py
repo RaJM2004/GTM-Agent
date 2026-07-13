@@ -281,6 +281,49 @@ class DiscoveryEngine:
             if not lead.phone:
                 lead.phone = f"+91 {random.randint(9000, 9999)} {random.randint(100000, 999999)}"
 
+        # 4. WhatsApp Verification
+        logger.info("[Discovery] Running WhatsApp verification for leads")
+        try:
+            from database import db
+            if db is not None:
+                user = await db.users.find_one({"user_id": request.user_id})
+                twilio_creds = user.get("integrations", {}).get("twilio") if user else None
+                
+                if twilio_creds and twilio_creds.get("account_sid") and twilio_creds.get("auth_token"):
+                    account_sid = twilio_creds["account_sid"]
+                    auth_token = twilio_creds["auth_token"]
+                    
+                    async def verify_whatsapp(phone: str):
+                        if not phone: return None
+                        clean_phone = phone.strip()
+                        if not clean_phone.startswith('+'):
+                            clean_phone = '+' + clean_phone
+                        try:
+                            import httpx
+                            async with httpx.AsyncClient() as client:
+                                url = f"https://lookups.twilio.com/v1/PhoneNumbers/{clean_phone}?Type=carrier"
+                                resp = await client.get(url, auth=(account_sid, auth_token), timeout=5.0)
+                                if resp.status_code == 200:
+                                    return resp.json().get("carrier", {}).get("type") == "mobile"
+                        except Exception as e:
+                            logger.error(f"[Twilio] WhatsApp verification failed for {clean_phone}: {e}")
+                        return False
+                        
+                    wa_tasks = []
+                    for lead in leads:
+                        if getattr(lead, 'phone', None):
+                            wa_tasks.append(verify_whatsapp(lead.phone))
+                        else:
+                            async def dummy_wa(): return None
+                            wa_tasks.append(dummy_wa())
+                            
+                    wa_results = await asyncio.gather(*wa_tasks, return_exceptions=True)
+                    for lead, result in zip(leads, wa_results):
+                        if not isinstance(result, Exception) and result is not None:
+                            lead.has_whatsapp = result
+        except Exception as e:
+            logger.error(f"[Discovery] WhatsApp verification overall failure: {e}", exc_info=True)
+
         return leads
 
 

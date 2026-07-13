@@ -59,7 +59,12 @@ export default function Discovery() {
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to fetch leads');
+        if (res.status === 402) {
+          if (window.confirm((errData.detail || errData.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
+            window.location.href = '/app/billing';
+          }
+        }
+        throw new Error(errData.detail || errData.message || 'Failed to fetch leads');
       }
       const data = await res.json();
       setLeads(data.leads || []);

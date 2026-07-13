@@ -42,7 +42,10 @@ def format_user_doc(user: dict) -> dict:
         "company": user.get("company"),
         "role": user.get("role", "user"),
         "auth_provider": user.get("auth_provider", "local"),
-        "integrations": user.get("integrations", {})
+        "integrations": user.get("integrations", {}),
+        "token_balance": user.get("token_balance", 0),
+        "trial_ends_at": user.get("trial_ends_at").isoformat() if user.get("trial_ends_at") else None,
+        "trial_active": user.get("trial_active", False)
     }
 
 # Helpers to set cookie
@@ -107,9 +110,9 @@ async def register(user_data: UserRegister, response: Response):
         "role": "user", # default role
         "auth_provider": "local",
         "billing_plan": "Pro",
-        "credits_used": {"emails_sent": 0, "ai_leads_discovered": 0, "linkedin_posts": 0, "ai_personalizations": 0},
-        "credits_limit": {"emails_sent": 5000, "ai_leads_discovered": 1000, "linkedin_posts": 100, "ai_personalizations": 5000},
-        "billing_cycle_reset": datetime.now(timezone.utc) + timedelta(days=30),
+        "token_balance": 100000.0,
+        "trial_ends_at": datetime.now(timezone.utc) + timedelta(days=14),
+        "trial_active": True,
         "created_at": datetime.now(timezone.utc)
     }
     
@@ -226,9 +229,9 @@ async def google_login(google_req: GoogleLoginRequest, response: Response):
             "auth_provider": "google",
             "google_sub": google_sub,
             "billing_plan": "Pro",
-            "credits_used": {"emails_sent": 0, "ai_leads_discovered": 0, "linkedin_posts": 0, "ai_personalizations": 0},
-            "credits_limit": {"emails_sent": 5000, "ai_leads_discovered": 1000, "linkedin_posts": 100, "ai_personalizations": 5000},
-            "billing_cycle_reset": datetime.now(timezone.utc) + timedelta(days=30),
+            "token_balance": 100000.0,
+            "trial_ends_at": datetime.now(timezone.utc) + timedelta(days=14),
+            "trial_active": True,
             "created_at": datetime.now(timezone.utc)
         }
         await db.users.insert_one(user)
@@ -283,9 +286,9 @@ async def get_billing_info(current_user: dict = Depends(get_current_user)):
         
     return {
         "billing_plan": user.get("billing_plan", "Free"),
-        "credits_used": user.get("credits_used", {}),
-        "credits_limit": user.get("credits_limit", {}),
-        "billing_cycle_reset": user.get("billing_cycle_reset")
+        "token_balance": user.get("token_balance", 0),
+        "trial_ends_at": user.get("trial_ends_at"),
+        "trial_active": user.get("trial_active", False)
     }
 
 

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 interface Lead {
+  id?: string;
   name: string;
   title: string;
   company: string;
@@ -20,6 +21,7 @@ interface Lead {
   is_verified: boolean;
   reply_status?: string;
   last_reply_body?: string;
+  has_whatsapp?: boolean | null;
 }
 
 interface IndustryGroup {
@@ -60,6 +62,48 @@ export default function Leads() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [replyFilter, setReplyFilter] = useState<'All' | 'Positive' | 'Negative' | 'Neutral'>('All');
   const [replyModalLead, setReplyModalLead] = useState<Lead | null>(null);
+  const [isDeletingLeads, setIsDeletingLeads] = useState(false);
+
+  const handleDeleteSelected = async () => {
+    const selectedIds = Array.from(selectedLeads);
+
+    if (selectedIds.length === 0) {
+      alert('Cannot delete: No valid IDs found for selected leads.');
+      return;
+    }
+
+    await handleDeleteBatch(selectedIds);
+  };
+
+  const handleDeleteBatch = async (ids: string[]) => {
+    if (!confirm(`Are you sure you want to delete ${ids.length} selected lead(s)?`)) return;
+
+    setIsDeletingLeads(true);
+    try {
+      const currentUserId = user?.user_id || 'user_12345_john_doe';
+      const res = await fetch(`http://localhost:8000/api/leads/delete-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: currentUserId, lead_ids: ids })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSelectedLeads(prev => {
+          const next = new Set(prev);
+          ids.forEach(id => next.delete(id));
+          return next;
+        });
+        fetchLeads();
+      } else {
+        alert(data.message || 'Failed to delete leads');
+      }
+    } catch (err) {
+      console.error('Batch delete failed:', err);
+      alert('Network error deleting leads');
+    } finally {
+      setIsDeletingLeads(false);
+    }
+  };
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -144,7 +188,7 @@ export default function Leads() {
   const selectAllInIndustry = (group: IndustryGroup) => {
     setSelectedLeads(prev => {
       const next = new Set(prev);
-      const allKeys = group.leads.map((l, i) => `${group.industry}-${i}`);
+      const allKeys = group.leads.filter(l => l.id).map(l => l.id as string);
       const allSelected = allKeys.every(k => next.has(k));
       if (allSelected) {
         allKeys.forEach(k => next.delete(k));
@@ -204,12 +248,22 @@ export default function Leads() {
             <Download className="w-4 h-4 mr-2" /> Export All CSV
           </button>
           {selectedLeads.size > 0 && (
-            <button 
-              onClick={() => navigate('/app/campaigns')}
-              className="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded-lg transition-colors shadow-sm font-medium"
-            >
-              <Plus className="w-4 h-4 mr-2" /> Add {selectedLeads.size} to Campaign
-            </button>
+            <>
+              <button 
+                onClick={handleDeleteSelected}
+                disabled={isDeletingLeads}
+                className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors shadow-sm font-medium disabled:opacity-50"
+              >
+                {isDeletingLeads ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />} 
+                Delete {selectedLeads.size} Leads
+              </button>
+              <button 
+                onClick={() => navigate('/app/campaigns')}
+                className="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded-lg transition-colors shadow-sm font-medium"
+              >
+                <Plus className="w-4 h-4 mr-2" /> Add {selectedLeads.size} to Campaign
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -338,12 +392,22 @@ export default function Leads() {
                       <Plus className="w-3.5 h-3.5 mr-1.5" /> {allSelected ? 'Deselect All' : 'Select All'}
                     </button>
                     <button
-                      onClick={() => handleDeleteIndustry(group.industry)}
-                      disabled={deleting === group.industry}
+                      onClick={() => {
+                        const selectedInGroupIds = group.leads.filter(l => l.id && selectedLeads.has(l.id)).map(l => l.id as string);
+                        if (selectedInGroupIds.length > 0) {
+                          handleDeleteBatch(selectedInGroupIds);
+                        } else {
+                          handleDeleteIndustry(group.industry);
+                        }
+                      }}
+                      disabled={deleting === group.industry || isDeletingLeads}
                       className="flex items-center px-3 py-1.5 bg-white border border-red-200 text-red-600 text-xs rounded-lg hover:bg-red-50 transition-colors shadow-sm disabled:opacity-50"
                     >
-                      {deleting === group.industry ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 mr-1.5" />}
-                      Delete
+                      {deleting === group.industry || isDeletingLeads ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 mr-1.5" />}
+                      {(() => {
+                        const count = group.leads.filter(l => l.id && selectedLeads.has(l.id)).length;
+                        return count > 0 ? `Delete ${count}` : 'Delete';
+                      })()}
                     </button>
                   </div>
                 </div>
@@ -373,19 +437,16 @@ export default function Leads() {
                       </thead>
                       <tbody>
                         {group.leads.map((lead, idx) => {
-                          const leadKey = `${group.industry}-${idx}`;
-                          const isSelected = selectedLeads.has(leadKey);
-
                           return (
                             <tr 
-                              key={idx} 
-                              className={`border-b border-[#F2DED6]/50 hover:bg-[#FDF8F5] transition-colors ${isSelected ? 'bg-primary/5' : ''}`}
+                              key={lead.id || idx} 
+                              className={`border-b border-[#F2DED6]/50 hover:bg-[#FDF8F5] transition-colors ${!!lead.id && selectedLeads.has(lead.id) ? 'bg-primary/5' : ''}`}
                             >
                               <td className="w-4 p-4">
                                 <input 
                                   type="checkbox" 
-                                  checked={isSelected}
-                                  onChange={() => toggleLeadSelection(leadKey)}
+                                  checked={!!lead.id && selectedLeads.has(lead.id)}
+                                  onChange={() => lead.id && toggleLeadSelection(lead.id)}
                                   className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary" 
                                 />
                               </td>
@@ -419,6 +480,16 @@ export default function Leads() {
                                     <div className="flex items-center gap-1.5 text-xs">
                                       <Phone className="w-3 h-3 text-gray-400 shrink-0" />
                                       <span className="text-gray-500 font-mono">{lead.phone}</span>
+                                      {lead.has_whatsapp === true && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 ml-1">
+                                          WhatsApp Verified
+                                        </span>
+                                      )}
+                                      {lead.has_whatsapp === false && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200 ml-1">
+                                          No WhatsApp
+                                        </span>
+                                      )}
                                     </div>
                                   )}
                                   {lead.linkedin_url && (

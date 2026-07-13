@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api/leads", tags=["leads"])
 
 
 class LeadItem(BaseModel):
+    id: str = ""
     name: str = ""
     title: str = ""
     company: str = ""
@@ -32,6 +33,7 @@ class LeadItem(BaseModel):
     discovery_prompt: str = ""
     company_size: str = ""
     is_verified: bool = False
+    has_whatsapp: Optional[bool] = None
     reply_status: Optional[str] = None
     last_reply_body: Optional[str] = None
 
@@ -49,6 +51,9 @@ class LeadsResponse(BaseModel):
     industry_groups: List[IndustryGroup] = []
 
 
+
+
+
 @router.get("", response_model=LeadsResponse)
 async def get_all_leads(user_id: str = ""):
     """
@@ -61,8 +66,12 @@ async def get_all_leads(user_id: str = ""):
             return LeadsResponse(success=True, total_leads=0, industry_groups=[])
 
         collection = db.leads
-        # Temporarily fetch all leads regardless of user_id for testing
-        cursor = collection.find({})
+        
+        query = {}
+        if user_id:
+            query["user_id"] = user_id
+            
+        cursor = collection.find(query)
         all_leads = await cursor.to_list(length=5000)
 
         # Group by industry
@@ -75,6 +84,7 @@ async def get_all_leads(user_id: str = ""):
                 industry_map[industry] = {"leads": [], "prompts": set()}
 
             industry_map[industry]["leads"].append(LeadItem(
+                id=str(doc.get("_id", "")),
                 name=doc.get("name", ""),
                 title=doc.get("title", ""),
                 company=doc.get("company", ""),
@@ -89,6 +99,7 @@ async def get_all_leads(user_id: str = ""):
                 discovery_prompt=doc.get("discovery_prompt", ""),
                 company_size=doc.get("company_size", ""),
                 is_verified=doc.get("is_verified", False),
+                has_whatsapp=doc.get("has_whatsapp", None),
                 reply_status=doc.get("reply_status", None),
                 last_reply_body=doc.get("last_reply_body", None),
             ))
@@ -188,9 +199,22 @@ async def delete_industry_leads(industry_name: str, user_id: str = ""):
             raise HTTPException(status_code=500, detail="Database not connected")
 
         collection = db.leads
-        result = await collection.delete_many(
-            {"industry": {"$regex": industry_name, "$options": "i"}, "user_id": user_id}
-        )
+        
+        query = {}
+        if user_id:
+            query["user_id"] = user_id
+            
+        if industry_name.lower() == "uncategorized":
+            query["$or"] = [
+                {"industry": {"$in": ["", None]}},
+                {"industry": {"$exists": False}},
+                {"industry": {"$regex": "^uncategorized$", "$options": "i"}}
+            ]
+        else:
+            query["industry"] = {"$regex": f"^{industry_name}$", "$options": "i"}
+            
+        result = await collection.delete_many(query)
+        
         return {
             "success": True,
             "deleted_count": result.deleted_count,
@@ -200,4 +224,43 @@ async def delete_industry_leads(industry_name: str, user_id: str = ""):
         raise
     except Exception as e:
         logger.error(f"[Leads API] Delete failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeleteBatchRequest(BaseModel):
+    user_id: str
+    lead_ids: List[str]
+
+
+@router.post("/delete-batch")
+async def delete_leads_batch(req: DeleteBatchRequest):
+    """Delete a specific batch of leads by ID."""
+    try:
+        from database import db
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not connected")
+            
+        from bson import ObjectId
+        
+        valid_ids = []
+        for lid in req.lead_ids:
+            try:
+                valid_ids.append(ObjectId(lid))
+            except:
+                pass
+                
+        if not valid_ids:
+            return {"success": True, "deleted_count": 0, "message": "No valid IDs provided."}
+
+        collection = db.leads
+        result = await collection.delete_many(
+            {"_id": {"$in": valid_ids}, "user_id": req.user_id}
+        )
+        return {
+            "success": True,
+            "deleted_count": result.deleted_count,
+            "message": f"Deleted {result.deleted_count} leads."
+        }
+    except Exception as e:
+        logger.error(f"[Leads API] Batch delete failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
