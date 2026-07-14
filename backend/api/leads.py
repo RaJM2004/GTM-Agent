@@ -67,9 +67,7 @@ async def get_all_leads(user_id: str = ""):
 
         collection = db.leads
         
-        query = {}
-        if user_id:
-            query["user_id"] = user_id
+        query = {"user_id": user_id}
             
         cursor = collection.find(query)
         all_leads = await cursor.to_list(length=5000)
@@ -200,9 +198,7 @@ async def delete_industry_leads(industry_name: str, user_id: str = ""):
 
         collection = db.leads
         
-        query = {}
-        if user_id:
-            query["user_id"] = user_id
+        query = {"user_id": user_id}
             
         if industry_name.lower() == "uncategorized":
             query["$or"] = [

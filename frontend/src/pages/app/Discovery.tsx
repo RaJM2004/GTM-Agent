@@ -37,7 +37,7 @@ function IcpBadge({ score, reasoning }: { score: number | null; reasoning?: stri
 }
 
 export default function Discovery() {
-  const { user } = useAuth();
+  const { user, checkSession } = useAuth();
   const [query, setQuery] = useState('');
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -69,6 +69,7 @@ export default function Discovery() {
       const data = await res.json();
       setLeads(data.leads || []);
       setSearched(true);
+      checkSession();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -96,6 +97,7 @@ export default function Discovery() {
       // Sort by ICP score descending
       scoredLeads.sort((a: any, b: any) => (b.icp_score ?? 0) - (a.icp_score ?? 0));
       setLeads(scoredLeads);
+      checkSession();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -122,7 +124,7 @@ export default function Discovery() {
             placeholder='e.g. "Find 50 AI founders with 50+ employees in Hyderabad"'
             className="w-full bg-transparent border-none py-4 pl-12 pr-32 text-gray-900 placeholder-gray-400 focus:ring-0 text-lg outline-none"
           />
-          <button 
+          <button
             onClick={handleSearch}
             disabled={loading || !query}
             className="absolute right-2 px-6 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl font-medium transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50">
@@ -175,17 +177,17 @@ export default function Discovery() {
               {scoring ? 'Scoring...' : 'Score ICP'}
             </button>
           )}
-          <button 
+          <button
             onClick={() => {
               if (leads.length === 0) return;
-              const headers = ['Name','Title','Company','Email','Phone','LinkedIn','Website','Location','Industry','Confidence'];
-              const rows = leads.map((l: any) => [l.name,l.title,l.company,l.email,l.phone,l.linkedin_url||'',l.website||'',l.location,l.industry||'',l.confidence||''].map(v => `"${(v||'').toString().replace(/"/g,'""')}"`).join(','));
+              const headers = ['Name', 'Title', 'Company', 'Email', 'Phone', 'LinkedIn', 'Website', 'Location', 'Industry', 'Confidence'];
+              const rows = leads.map((l: any) => [l.name, l.title, l.company, l.email, l.phone, l.linkedin_url || '', l.website || '', l.location, l.industry || '', l.confidence || ''].map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','));
               const csv = [headers.join(','), ...rows].join('\n');
               const blob = new Blob([csv], { type: 'text/csv' });
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
               a.href = url;
-              a.download = `discovery_leads_${new Date().toISOString().slice(0,10)}.csv`;
+              a.download = `discovery_leads_${new Date().toISOString().slice(0, 10)}.csv`;
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
@@ -196,7 +198,7 @@ export default function Discovery() {
           >
             <Download className="w-4 h-4 mr-2" /> Export CSV
           </button>
-          <a 
+          <a
             href="/app/leads"
             className="flex items-center px-4 py-2 bg-primary/10 text-primary border border-primary/20 text-sm rounded-lg hover:bg-primary/20 transition-colors"
           >
@@ -286,8 +288,8 @@ export default function Discovery() {
                     ) : error ? (
                       error.startsWith('Sir,') ? (
                         <div className="flex flex-col items-center gap-2">
-                           <Bot className="w-6 h-6 text-blue-500" />
-                           <span className="text-blue-600 font-medium">Waiting for your reply...</span>
+                          <Bot className="w-6 h-6 text-blue-500" />
+                          <span className="text-blue-600 font-medium">Waiting for your reply...</span>
                         </div>
                       ) : (
                         <span className="text-red-500">{error}</span>

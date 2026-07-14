@@ -37,19 +37,38 @@ async def save_leads(leads: list, prompt: str, user_id: str = ""):
     try:
         collection = db.leads
         
-        # Convert leads to dicts and add metadata
-        docs = []
+        saved_count = 0
         for lead in leads:
             lead_dict = lead.dict()
             lead_dict["discovery_prompt"] = prompt
             lead_dict["user_id"] = user_id
-            docs.append(lead_dict)
             
-        if docs:
-            # Insert many documents
-            await collection.insert_many(docs)
-            logger.info(f"Saved {len(docs)} leads to MongoDB")
-            return True
+            # Create a query to check for existing duplicates for this user
+            query = {"user_id": user_id}
+            or_conditions = []
+            
+            if lead_dict.get("email"):
+                or_conditions.append({"email": lead_dict["email"]})
+            if lead_dict.get("linkedin_url"):
+                or_conditions.append({"linkedin_url": lead_dict["linkedin_url"]})
+            if lead_dict.get("name") and lead_dict.get("company"):
+                or_conditions.append({"name": lead_dict["name"], "company": lead_dict["company"]})
+                
+            if or_conditions:
+                query["$or"] = or_conditions
+                result = await collection.update_one(
+                    query,
+                    {"$setOnInsert": lead_dict},
+                    upsert=True
+                )
+                if result.upserted_id:
+                    saved_count += 1
+            else:
+                await collection.insert_one(lead_dict)
+                saved_count += 1
+                
+        logger.info(f"Saved {saved_count} new leads to MongoDB")
+        return True
     except Exception as e:
         logger.error(f"Failed to save leads to MongoDB: {e}")
         return False
