@@ -110,7 +110,7 @@ async def create_or_update_assistant(
     system_prompt: str,
     assistant_name: str = "GTM Voice Agent",
     first_message: str = "Hello! Thanks for taking my call.",
-    voice_id: str = "jennifer-playht",
+    voice_id: str = "bIHbv24MWmeRgasZH58o",
 ) -> str:
     """
     Creates a new VAPI Assistant for this user (or updates existing).
@@ -134,7 +134,7 @@ async def create_or_update_assistant(
         "name": f"{assistant_name} ({user_id[:12]})",
         "model": {
             "provider": "groq",
-            "model": "llama-3.3-70b-versatile",
+            "model": "llama3-70b-8192",
             "messages": [
                 {
                     "role": "system",
@@ -144,7 +144,7 @@ async def create_or_update_assistant(
             "temperature": 0.5,
         },
         "voice": {
-            "provider": "playht",
+            "provider": "11labs",
             "voiceId": voice_id,
         },
         "firstMessage": first_message,
@@ -177,6 +177,8 @@ async def create_or_update_assistant(
             headers=_vapi_headers(),
             json=payload,
         )
+        if response.status_code >= 400:
+            logger.error(f"VAPI Assistant Creation Failed: {response.text}")
         response.raise_for_status()
         data = response.json()
         assistant_id = data.get("id")
