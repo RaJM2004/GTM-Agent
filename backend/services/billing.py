@@ -4,12 +4,20 @@ from database import db
 
 logger = logging.getLogger(__name__)
 
-# Define the token economy
+# Define the action-based token economy
 TOKEN_COSTS = {
-    "LLM_PROMPT_TOKEN": 1,        # 1 model prompt token = 1 billing token
-    "LLM_COMPLETION_TOKEN": 3,    # 1 model completion token = 3 billing tokens
-    "WEB_SEARCH": 500,            # 1 web search = 500 billing tokens
-    "VOICE_CALL_MINUTE": 10000    # 1 minute of voice calling = 10,000 billing tokens
+    "LEAD_DISCOVERY": 1,
+    "WEB_ENRICHMENT": 3,
+    "AI_EMAIL_GENERATION": 2,
+    "AI_SMS_GENERATION": 1,
+    "AI_LINKEDIN_GENERATION": 2,
+    "AI_VOICE_PROMPT_GENERATION": 1,
+    "EMAIL_SEND": 0,
+    "VOICE_CALL_MINUTE": 15,
+    "INBOX_AI_REPLY": 1,
+    "IMAGE_GENERATION": 5,
+    "LINKEDIN_POST": 2,
+    "SMS_SEND": 1,
 }
 
 async def check_and_deduct_credits(user_id: str, action_type: str, amount: float = 1.0, dry_run: bool = False) -> bool:

@@ -83,7 +83,7 @@ export default function Discovery() {
       const res = await fetch('http://localhost:8000/api/discovery/score-icp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leads, original_query: query }),
+        body: JSON.stringify({ leads, original_query: query, user_id: user?.user_id }),
       });
       if (!res.ok) throw new Error('ICP scoring failed');
       const data = await res.json();

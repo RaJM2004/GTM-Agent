@@ -111,6 +111,39 @@ async def notify_user_reconnect(
     return {"success": True, "message": f"Reconnect notification sent to user {user_id}"}
 
 
+@router.post("/users/{user_id}/add-tokens")
+async def add_tokens_to_user(
+    user_id: str,
+    body: dict,
+    _admin: dict = Depends(get_current_admin)
+):
+    """
+    Add (or subtract) tokens from a user.
+    Body: { "amount": 1000 }
+    """
+    from database import db
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+
+    amount = body.get("amount")
+    if amount is None or not isinstance(amount, (int, float)):
+        raise HTTPException(status_code=400, detail="'amount' field must be a number")
+
+    user = await db.users.find_one({"user_id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    current_balance = user.get("token_balance", 0.0)
+    new_balance = current_balance + amount
+
+    result = await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"token_balance": new_balance, "updated_at": datetime.now(timezone.utc)}}
+    )
+
+    return {"success": True, "user_id": user_id, "new_balance": new_balance}
+
+
 # ── Integration Monitoring ─────────────────────────────────────────────────────
 
 @router.get("/integrations/status")

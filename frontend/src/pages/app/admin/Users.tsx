@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Users, RefreshCw, UserCheck, UserX, Bell, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users, RefreshCw, UserCheck, UserX, Bell, Search, ChevronLeft, ChevronRight, Coins, X } from 'lucide-react';
+import { useAuth } from '../../../context/AuthContext';
 
 interface UserRecord {
   user_id: string;
@@ -18,6 +19,7 @@ interface UserRecord {
 const API_BASE = 'http://localhost:8000';
 
 export default function AdminUsers() {
+  const { user: currentUser, checkSession } = useAuth();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -25,6 +27,8 @@ export default function AdminUsers() {
   const [search, setSearch] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [tokenModalUser, setTokenModalUser] = useState<UserRecord | null>(null);
+  const [tokenAmountInput, setTokenAmountInput] = useState('');
   const LIMIT = 20;
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -84,6 +88,37 @@ export default function AdminUsers() {
       showToast('Reconnect notification sent', 'success');
     } catch (err: any) {
       showToast(err.message || 'Failed to send notification', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const submitAddTokens = async () => {
+    if (!tokenModalUser) return;
+    const amount = Number(tokenAmountInput);
+    if (isNaN(amount) || tokenAmountInput.trim() === '') {
+      showToast("Invalid amount", "error");
+      return;
+    }
+
+    setActionLoading(`tokens-${tokenModalUser.user_id}`);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/admin/users/${tokenModalUser.user_id}/add-tokens`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+      if (!res.ok) throw new Error('Failed to update tokens');
+      const data = await res.json();
+      showToast(`Successfully updated tokens. New balance: ${data.new_balance.toLocaleString()}`, 'success');
+      setTokenModalUser(null);
+      fetchUsers();
+      if (currentUser?.user_id === tokenModalUser.user_id) {
+        checkSession();
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Action failed', 'error');
     } finally {
       setActionLoading(null);
     }
@@ -231,6 +266,17 @@ export default function AdminUsers() {
                         >
                           <Bell className="w-4 h-4" />
                         </button>
+                        <button
+                          onClick={() => {
+                            setTokenModalUser(user);
+                            setTokenAmountInput('');
+                          }}
+                          disabled={actionLoading === `tokens-${user.user_id}`}
+                          title="Assign tokens"
+                          className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-50"
+                        >
+                          <Coins className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -269,6 +315,52 @@ export default function AdminUsers() {
             >
               <ChevronRight className="w-4 h-4" />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Token Modal */}
+      {tokenModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl border border-gray-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <Coins className="w-5 h-5 text-primary" />
+                Assign Tokens
+              </h3>
+              <button onClick={() => setTokenModalUser(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="mb-4 bg-gray-50 rounded-lg p-3 border border-gray-100">
+              <p className="text-sm text-gray-600 mb-1">User: <span className="font-semibold text-gray-900">{tokenModalUser.name || tokenModalUser.email}</span></p>
+              <p className="text-sm text-gray-600">Current Balance: <span className="font-semibold text-primary">{(tokenModalUser.token_balance ?? 0).toLocaleString()}</span></p>
+            </div>
+            <div className="mb-5">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tokens to Add (or subtract)</label>
+              <input
+                type="number"
+                value={tokenAmountInput}
+                onChange={(e) => setTokenAmountInput(e.target.value)}
+                placeholder="e.g. 5000 or -1000"
+                className="w-full border border-gray-200 rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setTokenModalUser(null)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitAddTokens}
+                disabled={actionLoading === `tokens-${tokenModalUser.user_id}` || !tokenAmountInput.trim()}
+                className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {actionLoading === `tokens-${tokenModalUser.user_id}` ? 'Saving...' : 'Assign Tokens'}
+              </button>
+            </div>
           </div>
         </div>
       )}

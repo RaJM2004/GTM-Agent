@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { apiFetch } from '../utils/api';
 
 export interface User {
@@ -20,6 +21,7 @@ interface AuthContextType {
   googleLogin: (credential: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+  checkSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -134,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         googleLogin,
         logout,
         clearError,
+        checkSession,
       }}
     >
       {children}

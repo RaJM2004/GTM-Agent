@@ -134,12 +134,17 @@ async def generate_campaign_content(req: ContentRequest):
             response_format={"type": "json_object"}
         )
         
-        from services.billing import check_and_deduct_credits
-        prompt_tokens = getattr(response.usage, "prompt_tokens", 100)
-        completion_tokens = getattr(response.usage, "completion_tokens", 50)
-        tokens_used = (prompt_tokens * 1) + (completion_tokens * 3)
+        from services.billing import check_and_deduct_credits, TOKEN_COSTS
         try:
-            await check_and_deduct_credits(req.user_id, "LLM_GENERATION", amount=tokens_used, dry_run=False)
+            channel = req.channel.lower()
+            if channel == "sms":
+                action = "AI_SMS_GENERATION"
+            elif channel == "linkedin":
+                action = "AI_LINKEDIN_GENERATION"
+            else:
+                action = "AI_EMAIL_GENERATION"
+                
+            await check_and_deduct_credits(req.user_id, action, amount=TOKEN_COSTS[action], dry_run=False)
         except Exception:
             pass # allow if no user context yet
             
@@ -181,12 +186,9 @@ async def generate_linkedin_image(req: ImageRequest):
             response_format={"type": "json_object"}
         )
         
-        from services.billing import check_and_deduct_credits
-        prompt_tokens = getattr(response.usage, "prompt_tokens", 100)
-        completion_tokens = getattr(response.usage, "completion_tokens", 50)
-        tokens_used = (prompt_tokens * 1) + (completion_tokens * 3) + 500 # extra 500 for image generation
+        from services.billing import check_and_deduct_credits, TOKEN_COSTS
         try:
-            await check_and_deduct_credits(req.user_id, "IMAGE_GENERATION", amount=tokens_used, dry_run=False)
+            await check_and_deduct_credits(req.user_id, "IMAGE_GENERATION", amount=TOKEN_COSTS["IMAGE_GENERATION"], dry_run=False)
         except Exception:
             pass
             
@@ -240,8 +242,8 @@ async def publish_linkedin_campaign(req: PublishRequest):
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
         
-    from services.billing import check_and_deduct_credits
-    await check_and_deduct_credits(req.user_id, "LINKEDIN_POST", amount=50.0, dry_run=False)
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+    await check_and_deduct_credits(req.user_id, "LINKEDIN_POST", amount=TOKEN_COSTS["LINKEDIN_POST"], dry_run=False)
         
     # 1. Fetch the user's LinkedIn Token from MongoDB
     user = await db.users.find_one({"user_id": req.user_id})
@@ -479,10 +481,10 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
     import re
     import time
     from services.email_fetcher import refresh_gmail_token
-    from services.billing import check_and_deduct_credits
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
     
     # Pre-flight check: Make sure they have at least enough tokens for emails
-    await check_and_deduct_credits(user_id, "EMAIL_SEND", amount=100.0, dry_run=True)
+    await check_and_deduct_credits(user_id, "EMAIL_SEND", amount=TOKEN_COSTS["EMAIL_SEND"], dry_run=True)
     
     # Pre-refresh Gmail token if needed
     if method.lower() == "gmail" and creds.get("auth_type") == "oauth":
@@ -506,7 +508,7 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
 
     import datetime
     from services.personalization import personalize_email_content
-    from services.billing import check_and_deduct_credits
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
 
     for lead in leads:
         lead_email = lead.get("email")
@@ -518,7 +520,7 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
 
         # Use AI to perfectly craft the email for this specific lead
         personalized_content = await personalize_email_content(content, lead, sender_name)
-        await check_and_deduct_credits(user_id, "AI_PERSONALIZATION", amount=50.0, dry_run=False)
+        await check_and_deduct_credits(user_id, "AI_EMAIL_GENERATION", amount=TOKEN_COSTS["AI_EMAIL_GENERATION"], dry_run=False)
 
         send_result = None
         if method.lower() == "gmail":
@@ -542,7 +544,7 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
         # send_result is a dict: {"success": bool, "message_id": str|None}
         if send_result and send_result.get("success"):
             successful_sends += 1
-            await check_and_deduct_credits(user_id, "EMAIL_SEND", amount=100.0, dry_run=False)
+            await check_and_deduct_credits(user_id, "EMAIL_SEND", amount=TOKEN_COSTS["EMAIL_SEND"], dry_run=False)
 
             message_id = send_result.get("message_id")
 
@@ -700,8 +702,8 @@ async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str 
         raise ValueError("Incomplete Twilio credentials. Please check your Integrations.")
         
     successful_sends = 0
-    from services.billing import check_and_deduct_credits
-    await check_and_deduct_credits(user_id, "SMS_SEND", amount=100.0, dry_run=True)
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+    await check_and_deduct_credits(user_id, "SMS_SEND", amount=TOKEN_COSTS["SMS_SEND"], dry_run=True)
     
     for lead in leads:
         lead_phone = lead.get("phone")
@@ -733,7 +735,7 @@ async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str 
             
         if success:
             successful_sends += 1
-            await check_and_deduct_credits(user_id, "SMS_SEND", amount=100.0, dry_run=False)
+            await check_and_deduct_credits(user_id, "SMS_SEND", amount=TOKEN_COSTS["SMS_SEND"], dry_run=False)
             
             # Mark the lead as SMSed
             if db is not None:
@@ -869,6 +871,10 @@ async def refine_voice_prompt_endpoint(req: VoicePromptRefineRequest):
     from services.vapi_service import refine_voice_prompt
     
     try:
+        from services.billing import check_and_deduct_credits, TOKEN_COSTS
+        
+        await check_and_deduct_credits(req.user_id, "AI_VOICE_PROMPT_GENERATION", amount=TOKEN_COSTS["AI_VOICE_PROMPT_GENERATION"], dry_run=False)
+        
         refined = await refine_voice_prompt(
             raw_prompt=req.raw_prompt,
             product_name=req.product_name,
@@ -896,7 +902,7 @@ async def publish_voice_campaign(req: VoicePublishRequest):
         process_call_transcript,
     )
     from services.sms_sender import send_sms_via_twilio
-    from services.billing import check_and_deduct_credits
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
     import datetime
     
     if db is None:
@@ -923,7 +929,7 @@ async def publish_voice_campaign(req: VoicePublishRequest):
     
     # 2. Check credits
     try:
-        await check_and_deduct_credits(req.user_id, "VOICE_CALL_MINUTE", amount=10000.0, dry_run=True)
+        await check_and_deduct_credits(req.user_id, "VOICE_CALL_MINUTE", amount=TOKEN_COSTS["VOICE_CALL_MINUTE"], dry_run=True)
     except Exception:
         pass  # Allow if billing not fully set up
     
@@ -1058,7 +1064,7 @@ async def publish_voice_campaign(req: VoicePublishRequest):
             
             # Deduct credits
             try:
-                await check_and_deduct_credits(req.user_id, "VOICE_CALL_MINUTE", amount=10000.0, dry_run=False)
+                await check_and_deduct_credits(req.user_id, "VOICE_CALL_MINUTE", amount=TOKEN_COSTS["VOICE_CALL_MINUTE"], dry_run=False)
             except Exception:
                 pass
             
