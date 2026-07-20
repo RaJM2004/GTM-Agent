@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Search, CheckCircle2, Settings, Link2, ExternalLink, X, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { apiFetch } from '../../utils/api';
 
 const initialIntegrations = [
   { id: 'twilio', name: 'Twilio', category: 'Communications', desc: 'SMS and Voice infrastructure', status: 'connected', logo: 'https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg' },
@@ -21,6 +22,9 @@ export default function Integrations() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [showWaModal, setShowWaModal] = useState(false);
+  const [waQrData, setWaQrData] = useState<{session_id: string, qr_code?: string} | null>(null);
+  const [isWaLoading, setIsWaLoading] = useState(false);
 
   useEffect(() => {
     if (user && user.integrations) {
@@ -89,6 +93,12 @@ export default function Integrations() {
       return;
     }
 
+    if (id === 'whatsapp') {
+      setShowWaModal(true);
+      startWaSession();
+      return;
+    }
+
     // Mock connection for others
     setIntegrations(integrations.map(int => 
       int.id === id ? { ...int, status: 'connected' } : int
@@ -150,6 +160,47 @@ export default function Integrations() {
     }
     setIsConnecting(false);
   };
+
+  const startWaSession = async () => {
+    setIsWaLoading(true);
+    setWaQrData(null);
+    try {
+      const data = await apiFetch('/api/whatsapp/connect', {
+        method: 'POST',
+      });
+      if (data.session_id) {
+        // data.data could contain the QR code depending on OpenWA format
+        setWaQrData({
+          session_id: data.session_id,
+          qr_code: data.data?.qr || null 
+        });
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Network error connecting WhatsApp');
+      setShowWaModal(false);
+    }
+    setIsWaLoading(false);
+  };
+
+  useEffect(() => {
+    let interval: any;
+    if (showWaModal && waQrData?.session_id) {
+      interval = setInterval(async () => {
+        try {
+          const data = await apiFetch(`/api/whatsapp/status/${waQrData.session_id}`);
+          if (data.connection_state === 'CONNECTED') { // Replace with actual OpenWA state
+            setIntegrations(prev => prev.map(int => int.id === 'whatsapp' ? { ...int, status: 'connected' } : int));
+            setShowWaModal(false);
+            alert('Successfully connected WhatsApp!');
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 5000); // Check every 5 seconds
+    }
+    return () => clearInterval(interval);
+  }, [showWaModal, waQrData]);
 
   return (
     <div className="space-y-6">
@@ -296,6 +347,35 @@ export default function Integrations() {
               <button onClick={submitTwilioConnect} disabled={isConnecting || !twilioForm.account_sid || !twilioForm.auth_token || !twilioForm.from_number} className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg flex items-center gap-2 font-medium disabled:opacity-50 transition-colors">
                  {isConnecting ? 'Connecting...' : 'Connect Account'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWaModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 text-center">
+            <h2 className="text-xl font-bold mb-4">Connect WhatsApp</h2>
+            <p className="text-sm text-gray-500 mb-6">Scan the QR code below with your WhatsApp mobile app to connect your account.</p>
+            
+            <div className="min-h-[200px] flex items-center justify-center border-2 border-dashed border-gray-200 rounded-xl mb-6">
+              {isWaLoading ? (
+                <div className="flex flex-col items-center text-gray-400">
+                  <Loader2 className="w-8 h-8 animate-spin mb-2 text-primary" />
+                  Generating QR Code...
+                </div>
+              ) : waQrData?.qr_code ? (
+                <img src={waQrData.qr_code} alt="WhatsApp QR Code" className="max-w-[200px] max-h-[200px]" />
+              ) : (
+                <div className="text-gray-400">
+                  <p>Check terminal logs if QR doesn't appear.</p>
+                  <p className="text-xs mt-1">(Depends on OpenWA config)</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowWaModal(false)} className="px-4 py-2 border border-[#F2DED6] hover:bg-gray-50 rounded-lg text-gray-600 font-medium transition-colors w-full">Cancel</button>
             </div>
           </div>
         </div>

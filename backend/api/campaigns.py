@@ -1222,3 +1222,87 @@ async def save_voice_draft(req: VoiceDraftRequest):
     await db.campaigns.insert_one(new_draft)
     return {"status": "success", "message": "Voice campaign saved as draft!"}
 
+async def _dispatch_whatsapp(user_id: str, leads: list, content: str, image_url: str = None, campaign_id: str = None) -> int:
+    from services.whatsapp import openwa_service
+    
+    successful_sends = 0
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+    await check_and_deduct_credits(user_id, "WHATSAPP_SEND", amount=TOKEN_COSTS.get("WHATSAPP_SEND", 1), dry_run=True)
+    
+    for lead in leads:
+        lead_phone = lead.get("phone")
+        if not lead_phone:
+            continue
+            
+        # Evolution API requires phone numbers without the '+' sign and without spaces
+        sanitized_phone = str(lead_phone).replace("+", "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            
+        lead_name = lead.get("name", "there")
+        personalized_content = content.replace("[Name]", lead_name).replace("{Name}", lead_name)
+        session_id = f"user_{user_id}"
+        
+        try:
+            if image_url:
+                result = await openwa_service.send_image_message(phone_number=sanitized_phone, image_url=image_url, caption=personalized_content, session_id=session_id)
+            else:
+                result = await openwa_service.send_text_message(phone_number=sanitized_phone, message=personalized_content, session_id=session_id)
+                
+            successful_sends += 1
+            await check_and_deduct_credits(user_id, "WHATSAPP_SEND", amount=TOKEN_COSTS.get("WHATSAPP_SEND", 1), dry_run=False)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send WhatsApp message to {lead_phone}: {e}")
+            
+    return successful_sends
+
+@router.post("/whatsapp/publish")
+async def publish_whatsapp_campaign(req: SmsPublishRequest):
+    from database import db
+    import datetime
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Publishing WhatsApp campaign '{req.name}' to {len(req.leads)} leads.")
+    
+    try:
+        successful_sends = await _dispatch_whatsapp(
+            user_id=req.user_id,
+            leads=req.leads,
+            content=req.content,
+            image_url=req.image_url
+        )
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
+    new_campaign = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Active",
+        "type": "WhatsApp",
+        "progress": 100,
+        "sent": successful_sends,
+        "replied": 0,
+        "booked": 0,
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "content": req.content,
+        "image_url": req.image_url,
+        "action": req.action,
+        "audience": [{"name": l.get("name", ""), "contact": l.get("phone", "")} for l in req.leads]
+    }
+    
+    await db.campaigns.insert_one(new_campaign)
+    
+    from services.notifications import create_notification
+    await create_notification(
+        user_id=req.user_id,
+        title="WhatsApp Campaign Completed",
+        message=f"WhatsApp campaign '{req.name}' successfully sent to {successful_sends} contacts.",
+        notif_type="success"
+    )
+    
+    return {"status": "success", "message": f"Successfully published and sent WhatsApp campaign to {successful_sends} contacts!"}

@@ -19,7 +19,8 @@ import {
   User as UserIcon,
   Contact,
   Coins,
-  ShieldAlert
+  ShieldAlert,
+  MessageCircle
 } from 'lucide-react';
 import NotificationBell from '../components/NotificationBell';
 
@@ -35,6 +36,7 @@ const navigation = [
   { name: 'Analytics', href: '/app/analytics', icon: BarChart3 },
   { name: 'Billing', href: '/app/billing', icon: CreditCard },
   { name: 'Integrations', href: '/app/integrations', icon: Plug },
+  { name: 'WhatsApp Logs', href: '/app/whatsapp-logs', icon: MessageCircle },
 ];
 
 export default function AppLayout() {

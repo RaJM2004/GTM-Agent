@@ -20,6 +20,10 @@ async def get_dashboard_stats(user_id: str = Depends(get_current_user)):
         # Get active campaigns
         active_campaigns = await db.campaigns.count_documents({"user_id": actual_user_id, "status": "Active"})
         
+        # Get WhatsApp Stats
+        from database import get_whatsapp_stats
+        whatsapp_stats = await get_whatsapp_stats(actual_user_id)
+        
         # Mocking meetings booked and conversion rate for now since we don't have dedicated collections
         # We can update these queries later when the collections/logic exist
         total_contacts = await db.contacts.count_documents({"user_id": actual_user_id})
@@ -38,6 +42,7 @@ async def get_dashboard_stats(user_id: str = Depends(get_current_user)):
                 "active_campaigns": active_campaigns,
                 "meetings_booked": meetings_booked,
                 "conversion_rate": conversion_rate,
+                "whatsapp": whatsapp_stats,
                 "billing": user.get("credits_used", {}) if user else {},
                 "billing_limit": user.get("credits_limit", {}) if user else {}
             }

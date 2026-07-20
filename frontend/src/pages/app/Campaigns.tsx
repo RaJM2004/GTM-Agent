@@ -120,7 +120,7 @@ export default function Campaigns() {
   };
 
   useEffect(() => {
-    if (showCreateModal && (campaignType === 'email' || campaignType === 'sms' || campaignType === 'voice')) {
+    if (showCreateModal && (campaignType === 'email' || campaignType === 'sms' || campaignType === 'whatsapp' || campaignType === 'voice')) {
       fetchLeads();
     }
   }, [showCreateModal, campaignType]);
@@ -322,6 +322,7 @@ export default function Campaigns() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          user_id: user?.user_id || 'user_12345_john_doe',
           channel: campaignType,
           objective: objective,
           action: action,
@@ -476,7 +477,7 @@ export default function Campaigns() {
           return;
         }
         alert(data.message);
-      } else if (campaignType === 'sms') {
+      } else if (campaignType === 'sms' || campaignType === 'whatsapp') {
         let collectedLeads: any[] = [];
         industryGroups.forEach(g => {
           (g.leads || []).forEach((l: any) => {
@@ -485,8 +486,8 @@ export default function Campaigns() {
             }
           });
         });
-        
-        const res = await fetch('http://localhost:8000/api/campaigns/sms/publish', {
+        const endpoint = campaignType === 'whatsapp' ? 'http://localhost:8000/api/campaigns/whatsapp/publish' : 'http://localhost:8000/api/campaigns/sms/publish';
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1168,7 +1169,7 @@ export default function Campaigns() {
                           </div>
                         )}
 
-                        {['email', 'sms'].includes(campaignType) && (
+                        {['email', 'sms', 'whatsapp'].includes(campaignType) && (
                           <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
                             <h3 className="text-sm font-semibold text-gray-900 mb-3">Select Audience</h3>
                             <div className="mb-3">
@@ -1210,9 +1211,9 @@ export default function Campaigns() {
                                     {expandedIndustries.has(group.industry) && (
                                       <div className="bg-gray-50 p-1.5 border-t border-gray-200 pl-6 max-h-32 overflow-y-auto">
                                         {(group.leads || [])
-                                          .filter((l: any) => campaignType === 'sms' ? l.phone : l.email)
+                                          .filter((l: any) => ['sms', 'whatsapp'].includes(campaignType) ? l.phone : l.email)
                                           .map((lead: any, i: number) => {
-                                            const isSelected = campaignType === 'sms' ? selectedLeadPhones.has(lead.phone) : selectedLeadEmails.has(lead.email);
+                                            const isSelected = ['sms', 'whatsapp'].includes(campaignType) ? selectedLeadPhones.has(lead.phone) : selectedLeadEmails.has(lead.email);
                                             const isDisabled = campaignType === 'email' && onlyVerifiedEmails && !lead.is_verified;
                                             return (
                                               <label key={i} className={`flex items-center p-1 hover:bg-white rounded transition-colors ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
@@ -1221,7 +1222,7 @@ export default function Campaigns() {
                                                   checked={isSelected}
                                                   onChange={() => {
                                                     if (!isDisabled) {
-                                                      if (campaignType === 'sms') {
+                                                      if (['sms', 'whatsapp'].includes(campaignType)) {
                                                         toggleLeadPhoneSelection(lead.phone);
                                                       } else {
                                                         toggleLeadSelection(lead.email);
@@ -1236,7 +1237,7 @@ export default function Campaigns() {
                                                     {lead.name || 'Unnamed'}
                                                     {campaignType === 'email' && lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded leading-none">✓ Verified</span>}
                                                   </span>
-                                                  <span className="text-[10px] text-gray-500">{campaignType === 'sms' ? lead.phone : lead.email}</span>
+                                                  <span className="text-[10px] text-gray-500">{['sms', 'whatsapp'].includes(campaignType) ? lead.phone : lead.email}</span>
                                                 </div>
                                               </label>
                                             );

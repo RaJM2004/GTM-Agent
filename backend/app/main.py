@@ -18,6 +18,7 @@ from api.dashboard import router as dashboard_router
 from api.payments import router as payments_router
 from api.admin import router as admin_router
 from api.notifications import router as notifications_router
+from api.whatsapp import router as whatsapp_router
 from database import connect_to_mongo, close_mongo_connection
 from fastapi.staticfiles import StaticFiles
 from middlewares.audit_logger import AuditLoggerMiddleware
@@ -90,7 +91,7 @@ app.include_router(dashboard_router)
 app.include_router(payments_router)
 app.include_router(admin_router)
 app.include_router(notifications_router)
-
+app.include_router(whatsapp_router)
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Genquantaa GTM OS API", "version": "1.0.0"}

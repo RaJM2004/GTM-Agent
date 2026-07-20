@@ -10,6 +10,7 @@ export default function Dashboard() {
     meetings_booked: 0,
     active_campaigns: 0,
     conversion_rate: 0,
+    whatsapp: { total_sent: 0, total_replies: 0 },
     billing: {} as Record<string, number>,
     billing_limit: {} as Record<string, number>
   });
@@ -88,7 +89,7 @@ export default function Dashboard() {
           GTM Campaign Performance
         </h2>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <div className="bg-white rounded-2xl p-6 border border-[#F2DED6] shadow-sm premium-card-hover">
             <div className="flex justify-between items-start mb-4">
               <span className="text-sm font-semibold text-gray-600">Total Leads</span>
@@ -131,6 +132,27 @@ export default function Dashboard() {
               {loading ? <span className="text-gray-300 animate-pulse">...</span> : `${stats.conversion_rate}%`}
             </div>
             <p className="text-xs text-gray-500">from 45,231 emails sent</p>
+          </div>
+          <div className="bg-white rounded-2xl p-6 border border-[#F2DED6] shadow-sm premium-card-hover">
+            <div className="flex justify-between items-start mb-4">
+              <span className="text-sm font-semibold text-gray-600">WhatsApp Sent</span>
+              <Megaphone className="w-5 h-5 text-gray-400" />
+            </div>
+            <div className="text-4xl font-bold text-gray-900 mb-2">
+              {loading ? <span className="text-gray-300 animate-pulse">...</span> : stats.whatsapp?.total_sent?.toLocaleString() || '0'}
+            </div>
+            <p className="text-xs text-gray-500">Total WhatsApp outreach.</p>
+          </div>
+
+          <div className="bg-white rounded-2xl p-6 border border-[#F2DED6] shadow-sm premium-card-hover">
+            <div className="flex justify-between items-start mb-4">
+              <span className="text-sm font-semibold text-gray-600">WhatsApp Replies</span>
+              <Users className="w-5 h-5 text-gray-400" />
+            </div>
+            <div className="text-4xl font-bold text-gray-900 mb-2">
+              {loading ? <span className="text-gray-300 animate-pulse">...</span> : stats.whatsapp?.total_replies?.toLocaleString() || '0'}
+            </div>
+            <p className="text-xs text-gray-500">Leads who responded.</p>
           </div>
         </div>
       </div>

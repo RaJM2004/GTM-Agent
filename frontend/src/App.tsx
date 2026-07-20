@@ -17,6 +17,7 @@ import Calls from './pages/app/Calls';
 import Analytics from './pages/app/Analytics';
 import Billing from './pages/app/Billing';
 import Settings from './pages/app/Settings';
+import WhatsAppLogs from './pages/app/WhatsAppLogs';
 import AdminUsers from './pages/app/admin/Users';
 import AdminVapiInventory from './pages/app/admin/VapiInventory';
 
@@ -56,6 +57,7 @@ function App() {
             <Route path="analytics" element={<Analytics />} />
             <Route path="billing" element={<Billing />} />
             <Route path="settings" element={<Settings />} />
+            <Route path="whatsapp-logs" element={<WhatsAppLogs />} />
             
             {/* Admin Routes */}
             <Route path="admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />

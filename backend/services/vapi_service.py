@@ -121,10 +121,10 @@ async def create_or_update_assistant(
     """
     from database import db
 
-    existing_assistant_id = None
+    existing_assistant_id = settings.VAPI_ASSISTANT_ID or None
 
-    # Check if user already has an assistant stored in MongoDB
-    if db is not None:
+    # Check if user already has an assistant stored in MongoDB (if not provided in env)
+    if db is not None and not existing_assistant_id:
         user_doc = await db.users.find_one({"user_id": user_id})
         if user_doc:
             vapi_data = user_doc.get("integrations", {}).get("vapi_assistant", {})
@@ -143,14 +143,18 @@ async def create_or_update_assistant(
             ],
             "temperature": 0.5,
         },
-        "voice": {
-            "provider": "11labs",
-            "voiceId": voice_id,
-        },
         "firstMessage": first_message,
         "serverUrl": settings.VAPI_WEBHOOK_URL or None,
         "endCallFunctionEnabled": True,
     }
+
+    # Only apply the hardcoded voice if we are creating a brand new assistant.
+    # If updating an existing one, we omit the voice property to preserve their Vapi dashboard voice settings.
+    if not existing_assistant_id:
+        payload["voice"] = {
+            "provider": "11labs",
+            "voiceId": voice_id,
+        }
 
     async with httpx.AsyncClient(timeout=30) as client:
         if existing_assistant_id:

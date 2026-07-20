@@ -166,7 +166,83 @@ async def get_call_stats(user_id: str) -> dict:
             del stats["_id"]
             return stats
         return {"total_calls": 0, "total_duration": 0, "meetings_booked": 0}
+
     except Exception as e:
         logger.error(f"Failed to get call stats: {e}")
         return {"total_calls": 0, "total_duration": 0, "meetings_booked": 0}
+
+
+# ── WhatsApp Logs (Message Campaigns) ─────────────────────────────────────────
+
+async def save_whatsapp_record(record_data: dict):
+    """Save an individual WhatsApp message record to the whatsapp_logs collection."""
+    if db is None:
+        logger.warning("MongoDB is not connected. WhatsApp log will not be saved.")
+        return None
+    try:
+        result = await db.whatsapp_logs.insert_one(record_data)
+        logger.info(f"Saved WhatsApp log: {result.inserted_id}")
+        return str(result.inserted_id)
+    except Exception as e:
+        logger.error(f"Failed to save WhatsApp log: {e}")
+        return None
+
+
+async def update_whatsapp_status(user_id: str, phone_number: str, new_status: str = "Replied"):
+    """Update a WhatsApp log's status based on phone number (for replies)."""
+    if db is None:
+        return False
+    try:
+        # Find the most recent message sent to this phone number by this user and update it
+        result = await db.whatsapp_logs.update_one(
+            {"user_id": user_id, "phone_number": phone_number},
+            {"$set": {"status": new_status}},
+            sort=[("created_at", -1)]
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        logger.error(f"Failed to update WhatsApp log for {phone_number}: {e}")
+        return False
+
+
+async def get_whatsapp_logs(user_id: str, limit: int = 100):
+    """Retrieve WhatsApp logs for a user."""
+    if db is None:
+        return []
+    try:
+        query = {"user_id": user_id}
+        cursor = db.whatsapp_logs.find(query).sort("created_at", -1).limit(limit)
+        logs = await cursor.to_list(length=limit)
+        for log in logs:
+            log["id"] = str(log["_id"])
+            del log["_id"]
+        return logs
+    except Exception as e:
+        logger.error(f"Failed to get WhatsApp logs: {e}")
+        return []
+
+async def get_whatsapp_stats(user_id: str) -> dict:
+    """Get aggregated WhatsApp statistics for a user's dashboard."""
+    if db is None:
+        return {"total_sent": 0, "total_replies": 0}
+    try:
+        pipeline = [
+            {"$match": {"user_id": user_id}},
+            {"$group": {
+                "_id": None,
+                "total_sent": {"$sum": 1},
+                "total_replies": {
+                    "$sum": {"$cond": [{"$eq": ["$status", "Replied"]}, 1, 0]}
+                },
+            }},
+        ]
+        result = await db.whatsapp_logs.aggregate(pipeline).to_list(length=1)
+        if result:
+            stats = result[0]
+            del stats["_id"]
+            return stats
+        return {"total_sent": 0, "total_replies": 0}
+    except Exception as e:
+        logger.error(f"Failed to get WhatsApp stats: {e}")
+        return {"total_sent": 0, "total_replies": 0}
 
