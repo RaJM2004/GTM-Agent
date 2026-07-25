@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # Payment Gateway Config
     CASHFREE_APP_ID: str = os.getenv("CASHFREE_APP_ID", "")
     CASHFREE_SECRET_KEY: str = os.getenv("CASHFREE_SECRET_KEY", "")
+    CASHFREE_ENVIRONMENT: str = os.getenv("CASHFREE_ENVIRONMENT", "SANDBOX")
 
     # Scraping Config
     MAX_CONCURRENT_REQUESTS: int = 10

@@ -289,7 +289,7 @@ export default function Campaigns() {
         setIsSendingEmail(false);
         return;
       }
-      
+
       if (data.status === 'error') {
         if (data.message && data.message.includes('Twilio')) {
           if (window.confirm(data.message + "\n\nWould you like to go to the Integrations page to connect it now?")) {
@@ -322,7 +322,6 @@ export default function Campaigns() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: user?.user_id || 'user_12345_john_doe',
           channel: campaignType,
           objective: objective,
           action: action,
@@ -486,8 +485,8 @@ export default function Campaigns() {
             }
           });
         });
-        const endpoint = campaignType === 'whatsapp' ? 'http://localhost:8000/api/campaigns/whatsapp/publish' : 'http://localhost:8000/api/campaigns/sms/publish';
-        const res = await fetch(endpoint, {
+
+        const res = await fetch('http://localhost:8000/api/campaigns/sms/publish', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -787,7 +786,7 @@ export default function Campaigns() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 w-full md:w-auto justify-end" onClick={e => e.stopPropagation()}>
-              <button 
+              <button
                 onClick={(e) => { e.stopPropagation(); deleteCampaign(campaign.id); }}
                 className="p-2 text-red-400 hover:text-red-600 bg-white hover:bg-red-50 rounded-lg transition-colors border border-gray-200 shadow-sm"
                 title="Delete Campaign"
@@ -1241,7 +1240,7 @@ export default function Campaigns() {
                                                 </div>
                                               </label>
                                             );
-                                        })}
+                                          })}
                                       </div>
                                     )}
                                   </div>
@@ -1274,7 +1273,7 @@ export default function Campaigns() {
                     )}
                   </>
                 )}
-                
+
                 {/* SMS Logs Section */}
                 {viewingCampaign && viewingCampaign.type?.toLowerCase() === 'sms' && viewingCampaign.status === 'Active' && (
                   <div className="mt-8 border-t border-gray-100 pt-6">
@@ -1335,7 +1334,7 @@ export default function Campaigns() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button 
+                <button
                   onClick={() => deleteCampaign(viewingCampaign.id)}
                   className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                   title="Delete Campaign"
@@ -1391,7 +1390,7 @@ export default function Campaigns() {
                 <div className="border-t border-gray-100 pt-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Send Campaign</h3>
                   {/* Sending UI */}
-                      <div className="mb-4">
+                  <div className="mb-4">
                     <label className="flex items-center gap-2 cursor-pointer bg-emerald-50 p-2.5 rounded-lg border border-emerald-200">
                       <input
                         type="checkbox"
@@ -1408,72 +1407,72 @@ export default function Campaigns() {
                     {industryGroups.length === 0 ? (
                       <p className="text-sm text-gray-500 italic">No leads found. Discover leads first.</p>
                     ) : (
-                        industryGroups.map(group => (
-                          <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden">
-                            <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
-                              <input
-                                type="checkbox"
-                                checked={selectedIndustries.has(group.industry)}
-                                onChange={() => toggleIndustrySelection(group.industry, group.leads)}
-                                className="w-4 h-4 mr-3 text-primary focus:ring-primary rounded border-gray-300 cursor-pointer"
-                              />
-                              <div
-                                className="flex justify-between flex-1 cursor-pointer"
-                                onClick={() => toggleIndustryExpanded(group.industry)}
-                              >
-                                <span className="text-sm font-medium text-gray-900 flex items-center gap-2">
-                                  {expandedIndustries.has(group.industry) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                                  {group.industry}
-                                </span>
-                                <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">{group.lead_count} leads</span>
-                              </div>
+                      industryGroups.map(group => (
+                        <div key={group.industry} className="flex flex-col border border-gray-200 rounded overflow-hidden">
+                          <div className="flex items-center p-2 hover:bg-gray-50 bg-white">
+                            <input
+                              type="checkbox"
+                              checked={selectedIndustries.has(group.industry)}
+                              onChange={() => toggleIndustrySelection(group.industry, group.leads)}
+                              className="w-4 h-4 mr-3 text-primary focus:ring-primary rounded border-gray-300 cursor-pointer"
+                            />
+                            <div
+                              className="flex justify-between flex-1 cursor-pointer"
+                              onClick={() => toggleIndustryExpanded(group.industry)}
+                            >
+                              <span className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                                {expandedIndustries.has(group.industry) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                {group.industry}
+                              </span>
+                              <span className="text-xs text-gray-500 bg-white px-2 py-0.5 rounded-full border border-gray-200">{group.lead_count} leads</span>
                             </div>
-                            {expandedIndustries.has(group.industry) && (
-                              <div className="bg-gray-50 p-2 border-t border-gray-200 pl-8 max-h-40 overflow-y-auto">
-                                {(group.leads || [])
-                                  .filter((l: any) => {
-                                    const t = viewingCampaign.type?.toLowerCase();
-                                    return (t === 'sms' || t === 'call' || t === 'voice') ? l.phone : l.email;
-                                  })
-                                  .map((lead: any, i: number) => {
-                                    const t = viewingCampaign.type?.toLowerCase();
-                                    const isSmsOrCall = (t === 'sms' || t === 'call' || t === 'voice');
-                                    const isSelected = isSmsOrCall ? selectedLeadPhones.has(lead.phone) : selectedLeadEmails.has(lead.email);
-                                    const isDisabled = !isSmsOrCall && onlyVerifiedEmails && !lead.is_verified;
-                                    
-                                    return (
-                                      <label key={i} className={`flex items-center p-1.5 hover:bg-white rounded transition-colors ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
-                                        <input
-                                          type="checkbox"
-                                          checked={isSelected}
-                                          onChange={() => { 
-                                            if (!isDisabled) {
-                                              if (isSmsOrCall) {
-                                                toggleLeadPhoneSelection(lead.phone);
-                                              } else {
-                                                toggleLeadSelection(lead.email);
-                                              }
-                                            }
-                                          }}
-                                          disabled={isDisabled}
-                                          className="w-3.5 h-3.5 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
-                                        />
-                                        <div className="flex flex-col ml-3">
-                                          <span className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
-                                            {lead.name || 'Unnamed'}
-                                            {!isSmsOrCall && lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded leading-none">✓ Verified</span>}
-                                          </span>
-                                          <span className="text-xs text-gray-500">{isSmsOrCall ? lead.phone : lead.email}</span>
-                                        </div>
-                                      </label>
-                                    );
-                                  })}
-                              </div>
-                            )}
                           </div>
-                        ))
-                      )}
-                    </div>
+                          {expandedIndustries.has(group.industry) && (
+                            <div className="bg-gray-50 p-2 border-t border-gray-200 pl-8 max-h-40 overflow-y-auto">
+                              {(group.leads || [])
+                                .filter((l: any) => {
+                                  const t = viewingCampaign.type?.toLowerCase();
+                                  return (t === 'sms' || t === 'call' || t === 'voice') ? l.phone : l.email;
+                                })
+                                .map((lead: any, i: number) => {
+                                  const t = viewingCampaign.type?.toLowerCase();
+                                  const isSmsOrCall = (t === 'sms' || t === 'call' || t === 'voice');
+                                  const isSelected = isSmsOrCall ? selectedLeadPhones.has(lead.phone) : selectedLeadEmails.has(lead.email);
+                                  const isDisabled = !isSmsOrCall && onlyVerifiedEmails && !lead.is_verified;
+
+                                  return (
+                                    <label key={i} className={`flex items-center p-1.5 hover:bg-white rounded transition-colors ${isDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => {
+                                          if (!isDisabled) {
+                                            if (isSmsOrCall) {
+                                              toggleLeadPhoneSelection(lead.phone);
+                                            } else {
+                                              toggleLeadSelection(lead.email);
+                                            }
+                                          }
+                                        }}
+                                        disabled={isDisabled}
+                                        className="w-3.5 h-3.5 text-primary focus:ring-primary rounded border-gray-300 disabled:opacity-50"
+                                      />
+                                      <div className="flex flex-col ml-3">
+                                        <span className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                                          {lead.name || 'Unnamed'}
+                                          {!isSmsOrCall && lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded leading-none">✓ Verified</span>}
+                                        </span>
+                                        <span className="text-xs text-gray-500">{isSmsOrCall ? lead.phone : lead.email}</span>
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
                   <div className="mt-6">
                     <button
                       onClick={handleSendExistingCampaign}

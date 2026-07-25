@@ -4,7 +4,12 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-CASHFREE_API_URL = "https://sandbox.cashfree.com/pg/orders"  # Use production URL in prod
+CASHFREE_SANDBOX_URL = "https://sandbox.cashfree.com/pg/orders"
+CASHFREE_PRODUCTION_URL = "https://api.cashfree.com/pg/orders"
+
+def _get_cashfree_url() -> str:
+    env = (settings.CASHFREE_ENVIRONMENT or "SANDBOX").upper()
+    return CASHFREE_PRODUCTION_URL if env == "PRODUCTION" else CASHFREE_SANDBOX_URL
 
 async def create_cashfree_order(order_id: str, amount: float, customer_id: str, customer_email: str, customer_phone: str) -> dict:
     """
@@ -36,7 +41,7 @@ async def create_cashfree_order(order_id: str, amount: float, customer_id: str, 
     }
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(CASHFREE_API_URL, json=payload, headers=headers)
+        response = await client.post(_get_cashfree_url(), json=payload, headers=headers)
         
         if response.status_code == 200:
             data = response.json()
