@@ -1,20 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Search, CheckCircle2, Settings, Link2, ExternalLink, X, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { apiFetch } from '../../utils/api';
 
 const initialIntegrations = [
-  { id: 'openai', name: 'OpenAI', category: 'AI Models', desc: 'Power your agents with GPT-4', status: 'connected', logo: 'https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg' },
-  { id: 'gemini', name: 'Google Gemini', category: 'AI Models', desc: 'Use Gemini Pro for advanced reasoning', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg' },
   { id: 'twilio', name: 'Twilio', category: 'Communications', desc: 'SMS and Voice infrastructure', status: 'connected', logo: 'https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg' },
-  { id: 'vapi', name: 'VAPI', category: 'Communications', desc: 'Voice AI calling infrastructure', status: 'available', logo: 'https://vapi.ai/logo.svg' },
-  { id: 'apollo', name: 'Apollo.io', category: 'Data & Enrichment', desc: 'B2B contact database', status: 'connected', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/Apollo.io_logo.png/600px-Apollo.io_logo.png' },
-  { id: 'hunter', name: 'Hunter.io', category: 'Data & Enrichment', desc: 'Find professional email addresses', status: 'available', logo: 'https://hunter.io/assets/logo-b94ab9668bdcc7bc0c410ca3ad1741db.svg' },
   { id: 'linkedin', name: 'LinkedIn', category: 'Channels', desc: 'Automate LinkedIn outreach', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png' },
   { id: 'gmail', name: 'Google Workspace / Gmail', category: 'Channels', desc: 'Send and receive emails', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg' },
   { id: 'outlook', name: 'Microsoft Outlook', category: 'Channels', desc: 'Connect your Office 365 / Outlook account', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg' },
   { id: 'smtp', name: 'Custom SMTP', category: 'Channels', desc: 'Connect any email provider via SMTP credentials', status: 'available', logo: 'https://cdn-icons-png.flaticon.com/512/2950/2950689.png' },
   { id: 'whatsapp', name: 'WhatsApp Business', category: 'Channels', desc: 'WhatsApp API integration', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg' },
-  { id: 'stripe', name: 'Stripe', category: 'Billing', desc: 'Payment processing', status: 'connected', logo: 'https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg' },
 ];
 
 export default function Integrations() {
@@ -22,9 +17,14 @@ export default function Integrations() {
   const [integrations, setIntegrations] = useState(initialIntegrations);
   const [showEmailModal, setShowEmailModal] = useState<string | null>(null);
   const [emailForm, setEmailForm] = useState({ host: '', port: '', email: '', password: '' });
+  const [showTwilioModal, setShowTwilioModal] = useState(false);
+  const [twilioForm, setTwilioForm] = useState({ account_sid: '', auth_token: '', from_number: '' });
   const [isConnecting, setIsConnecting] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [showWaModal, setShowWaModal] = useState(false);
+  const [waQrData, setWaQrData] = useState<{session_id: string, qr_code?: string} | null>(null);
+  const [isWaLoading, setIsWaLoading] = useState(false);
 
   useEffect(() => {
     if (user && user.integrations) {
@@ -88,6 +88,17 @@ export default function Integrations() {
       return;
     }
 
+    if (id === 'twilio') {
+      setShowTwilioModal(true);
+      return;
+    }
+
+    if (id === 'whatsapp') {
+      setShowWaModal(true);
+      startWaSession();
+      return;
+    }
+
     // Mock connection for others
     setIntegrations(integrations.map(int => 
       int.id === id ? { ...int, status: 'connected' } : int
@@ -122,6 +133,75 @@ export default function Integrations() {
     }
     setIsConnecting(false);
   };
+
+  const submitTwilioConnect = async () => {
+    setIsConnecting(true);
+    try {
+      const res = await fetch('http://localhost:8000/api/integrations/twilio/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.user_id || 'user_12345_john_doe',
+          ...twilioForm
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIntegrations(integrations.map(int => int.id === 'twilio' ? { ...int, status: 'connected' } : int));
+        setShowTwilioModal(false);
+        setTwilioForm({ account_sid: '', auth_token: '', from_number: '' });
+        alert(`Successfully connected Twilio! You can now send SMS Campaigns.`);
+      } else {
+        alert(data.detail || 'Failed to connect');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error connecting Twilio');
+    }
+    setIsConnecting(false);
+  };
+
+  const startWaSession = async () => {
+    setIsWaLoading(true);
+    setWaQrData(null);
+    try {
+      const data = await apiFetch('/api/whatsapp/connect', {
+        method: 'POST',
+      });
+      if (data.session_id) {
+        // data.data could contain the QR code depending on OpenWA format
+        setWaQrData({
+          session_id: data.session_id,
+          qr_code: data.data?.qr || null 
+        });
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Network error connecting WhatsApp');
+      setShowWaModal(false);
+    }
+    setIsWaLoading(false);
+  };
+
+  useEffect(() => {
+    let interval: any;
+    if (showWaModal && waQrData?.session_id) {
+      interval = setInterval(async () => {
+        try {
+          const data = await apiFetch(`/api/whatsapp/status/${waQrData.session_id}`);
+          if (data.connection_state === 'CONNECTED') { // Replace with actual OpenWA state
+            setIntegrations(prev => prev.map(int => int.id === 'whatsapp' ? { ...int, status: 'connected' } : int));
+            setShowWaModal(false);
+            alert('Successfully connected WhatsApp!');
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 5000); // Check every 5 seconds
+    }
+    return () => clearInterval(interval);
+  }, [showWaModal, waQrData]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -242,6 +322,64 @@ export default function Integrations() {
           </div>
         </div>
       )}
+
+      {showTwilioModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold mb-4">Connect Twilio</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Account SID</label>
+                <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.account_sid} onChange={e => setTwilioForm({...twilioForm, account_sid: e.target.value})} placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Auth Token</label>
+                <input type="password" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.auth_token} onChange={e => setTwilioForm({...twilioForm, auth_token: e.target.value})} placeholder="your_auth_token" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">From Phone Number</label>
+                <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.from_number} onChange={e => setTwilioForm({...twilioForm, from_number: e.target.value})} placeholder="+1234567890" />
+                <p className="text-xs text-gray-500 mt-2">Enter your Twilio phone number in E.164 format (e.g., +1234567890).</p>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3 justify-end">
+              <button onClick={() => setShowTwilioModal(false)} className="px-4 py-2 border border-[#F2DED6] hover:bg-gray-50 rounded-lg text-gray-600 font-medium transition-colors">Cancel</button>
+              <button onClick={submitTwilioConnect} disabled={isConnecting || !twilioForm.account_sid || !twilioForm.auth_token || !twilioForm.from_number} className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg flex items-center gap-2 font-medium disabled:opacity-50 transition-colors">
+                 {isConnecting ? 'Connecting...' : 'Connect Account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWaModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 text-center">
+            <h2 className="text-xl font-bold mb-4">Connect WhatsApp</h2>
+            <p className="text-sm text-gray-500 mb-6">Scan the QR code below with your WhatsApp mobile app to connect your account.</p>
+            
+            <div className="min-h-[200px] flex items-center justify-center border-2 border-dashed border-gray-200 rounded-xl mb-6">
+              {isWaLoading ? (
+                <div className="flex flex-col items-center text-gray-400">
+                  <Loader2 className="w-8 h-8 animate-spin mb-2 text-primary" />
+                  Generating QR Code...
+                </div>
+              ) : waQrData?.qr_code ? (
+                <img src={waQrData.qr_code} alt="WhatsApp QR Code" className="max-w-[200px] max-h-[200px]" />
+              ) : (
+                <div className="text-gray-400">
+                  <p>Check terminal logs if QR doesn't appear.</p>
+                  <p className="text-xs mt-1">(Depends on OpenWA config)</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowWaModal(false)} className="px-4 py-2 border border-[#F2DED6] hover:bg-gray-50 rounded-lg text-gray-600 font-medium transition-colors w-full">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Configuration Modal */}
       {showConfigModal && (
@@ -265,16 +403,39 @@ export default function Integrations() {
                   <div>
                     <p className="text-sm font-medium text-gray-900">Connected Account</p>
                     <p className="text-sm text-gray-500 font-mono mt-1 truncate max-w-[200px]">
-                      {user?.integrations?.[showConfigModal]?.email || 'Connected via OAuth'}
+                      {user?.integrations?.[showConfigModal]?.email || user?.integrations?.[showConfigModal]?.from_number || 'Connected via OAuth'}
                     </p>
                   </div>
                   <span className="flex items-center text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-200">
                     <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Active
                   </span>
                 </div>
+                {showConfigModal === 'twilio' && (
+                  <div className="p-4 bg-[#FAF9F6] border border-[#F2DED6] rounded-xl text-sm text-gray-700 space-y-2 font-mono">
+                    <p><span className="font-semibold">Account SID:</span> {user?.integrations?.twilio?.account_sid}</p>
+                    <p><span className="font-semibold">Auth Token:</span> ••••••••</p>
+                  </div>
+                )}
               </div>
               
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                {showConfigModal === 'twilio' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTwilioForm({
+                        account_sid: user?.integrations?.twilio?.account_sid || '',
+                        auth_token: user?.integrations?.twilio?.auth_token || '',
+                        from_number: user?.integrations?.twilio?.from_number || ''
+                      });
+                      setShowConfigModal(null);
+                      setShowTwilioModal(true);
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors mr-auto"
+                  >
+                    Edit Credentials
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowConfigModal(null)}

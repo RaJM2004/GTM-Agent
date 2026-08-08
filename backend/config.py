@@ -23,6 +23,18 @@ class Settings(BaseSettings):
     LINKEDIN_CLIENT_SECRET: str = os.getenv("LINKEDIN_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     HF_TOKEN: str = os.getenv("HF_TOKEN", "")
+
+    # VAPI Voice AI Config
+    VAPI_API_KEY: str = os.getenv("VAPI_API_KEY", "")
+    VAPI_ASSISTANT_ID: str = os.getenv("VAPI_ASSISTANT_ID", "")
+    VAPI_WEBHOOK_URL: str = os.getenv("VAPI_WEBHOOK_URL", "")
+
+    # Email Verification (Reacher - self-hosted via Docker)
+    REACHER_API_URL: str = os.getenv("REACHER_API_URL", "http://localhost:8080")
+    
+    # WhatsApp (Evolution API) Config
+    EVOLUTION_API_URL: str = os.getenv("EVOLUTION_API_URL", "http://localhost:8082")
+    EVOLUTION_API_KEY: str = os.getenv("EVOLUTION_API_KEY", "gtm_super_secret_global_key")
     
     # Server Config
     HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -36,6 +48,11 @@ class Settings(BaseSettings):
     RESET_TOKEN_EXPIRE_HOURS: int = int(os.getenv("RESET_TOKEN_EXPIRE_HOURS", "1"))
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+
+    # Payment Gateway Config
+    CASHFREE_APP_ID: str = os.getenv("CASHFREE_APP_ID", "")
+    CASHFREE_SECRET_KEY: str = os.getenv("CASHFREE_SECRET_KEY", "")
+    CASHFREE_ENVIRONMENT: str = os.getenv("CASHFREE_ENVIRONMENT", "SANDBOX")
 
     # Scraping Config
     MAX_CONCURRENT_REQUESTS: int = 10

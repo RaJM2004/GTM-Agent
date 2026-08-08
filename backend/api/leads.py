@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api/leads", tags=["leads"])
 
 
 class LeadItem(BaseModel):
+    id: str = ""
     name: str = ""
     title: str = ""
     company: str = ""
@@ -31,6 +32,10 @@ class LeadItem(BaseModel):
     source: str = ""
     discovery_prompt: str = ""
     company_size: str = ""
+    is_verified: bool = False
+    has_whatsapp: Optional[bool] = None
+    reply_status: Optional[str] = None
+    last_reply_body: Optional[str] = None
 
 
 class IndustryGroup(BaseModel):
@@ -46,6 +51,9 @@ class LeadsResponse(BaseModel):
     industry_groups: List[IndustryGroup] = []
 
 
+
+
+
 @router.get("", response_model=LeadsResponse)
 async def get_all_leads(user_id: str = ""):
     """
@@ -58,7 +66,10 @@ async def get_all_leads(user_id: str = ""):
             return LeadsResponse(success=True, total_leads=0, industry_groups=[])
 
         collection = db.leads
-        cursor = collection.find({"user_id": user_id})
+        
+        query = {"user_id": user_id}
+            
+        cursor = collection.find(query)
         all_leads = await cursor.to_list(length=5000)
 
         # Group by industry
@@ -71,6 +82,7 @@ async def get_all_leads(user_id: str = ""):
                 industry_map[industry] = {"leads": [], "prompts": set()}
 
             industry_map[industry]["leads"].append(LeadItem(
+                id=str(doc.get("_id", "")),
                 name=doc.get("name", ""),
                 title=doc.get("title", ""),
                 company=doc.get("company", ""),
@@ -84,6 +96,10 @@ async def get_all_leads(user_id: str = ""):
                 source=doc.get("source", ""),
                 discovery_prompt=doc.get("discovery_prompt", ""),
                 company_size=doc.get("company_size", ""),
+                is_verified=doc.get("is_verified", False),
+                has_whatsapp=doc.get("has_whatsapp", None),
+                reply_status=doc.get("reply_status", None),
+                last_reply_body=doc.get("last_reply_body", None),
             ))
             prompt = doc.get("discovery_prompt", "")
             if prompt:
@@ -136,7 +152,7 @@ async def export_leads_csv(industry: Optional[str] = None, user_id: str = ""):
         writer.writerow([
             "Name", "Title", "Company", "Email", "Phone",
             "LinkedIn", "Website", "Location", "Industry",
-            "Company Size", "Confidence", "Source", "Discovery Prompt"
+            "Company Size", "Confidence", "Source", "Discovery Prompt", "Reply Status"
         ])
 
         for doc in all_leads:
@@ -154,6 +170,7 @@ async def export_leads_csv(industry: Optional[str] = None, user_id: str = ""):
                 doc.get("confidence", ""),
                 doc.get("source", ""),
                 doc.get("discovery_prompt", ""),
+                doc.get("reply_status", "") or "No Reply",
             ])
 
         output.seek(0)
@@ -180,9 +197,20 @@ async def delete_industry_leads(industry_name: str, user_id: str = ""):
             raise HTTPException(status_code=500, detail="Database not connected")
 
         collection = db.leads
-        result = await collection.delete_many(
-            {"industry": {"$regex": industry_name, "$options": "i"}, "user_id": user_id}
-        )
+        
+        query = {"user_id": user_id}
+            
+        if industry_name.lower() == "uncategorized":
+            query["$or"] = [
+                {"industry": {"$in": ["", None]}},
+                {"industry": {"$exists": False}},
+                {"industry": {"$regex": "^uncategorized$", "$options": "i"}}
+            ]
+        else:
+            query["industry"] = {"$regex": f"^{industry_name}$", "$options": "i"}
+            
+        result = await collection.delete_many(query)
+        
         return {
             "success": True,
             "deleted_count": result.deleted_count,
@@ -192,4 +220,43 @@ async def delete_industry_leads(industry_name: str, user_id: str = ""):
         raise
     except Exception as e:
         logger.error(f"[Leads API] Delete failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeleteBatchRequest(BaseModel):
+    user_id: str
+    lead_ids: List[str]
+
+
+@router.post("/delete-batch")
+async def delete_leads_batch(req: DeleteBatchRequest):
+    """Delete a specific batch of leads by ID."""
+    try:
+        from database import db
+        if db is None:
+            raise HTTPException(status_code=500, detail="Database not connected")
+            
+        from bson import ObjectId
+        
+        valid_ids = []
+        for lid in req.lead_ids:
+            try:
+                valid_ids.append(ObjectId(lid))
+            except:
+                pass
+                
+        if not valid_ids:
+            return {"success": True, "deleted_count": 0, "message": "No valid IDs provided."}
+
+        collection = db.leads
+        result = await collection.delete_many(
+            {"_id": {"$in": valid_ids}, "user_id": req.user_id}
+        )
+        return {
+            "success": True,
+            "deleted_count": result.deleted_count,
+            "message": f"Deleted {result.deleted_count} leads."
+        }
+    except Exception as e:
+        logger.error(f"[Leads API] Batch delete failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

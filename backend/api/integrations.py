@@ -215,6 +215,101 @@ async def connect_email(req: EmailConnectRequest):
     return {"status": "success", "message": f"{req.provider} connected successfully"}
 
 
+class TwilioConnectRequest(BaseModel):
+    user_id: str
+    account_sid: str
+    auth_token: str
+    from_number: str
+
+@router.post("/twilio/connect")
+async def connect_twilio(req: TwilioConnectRequest):
+    """Saves Twilio credentials to the user's integrations."""
+    await save_integration_token(
+        user_id=req.user_id,
+        platform="twilio",
+        token_data={
+            "account_sid": req.account_sid,
+            "auth_token": req.auth_token,
+            "from_number": req.from_number
+        }
+    )
+    return {"status": "success", "message": "Twilio connected successfully"}
+
+
+
+async def _process_incoming_emails(emails: list, user_id: str):
+    from database import db
+    from services.sentiment import classify_email_sentiment
+
+    if db is None or not emails:
+        return emails
+
+    for email in emails:
+        sender_email = email.get("sender_email")
+        if not sender_email:
+            continue
+
+        body_text = email.get("body", "")
+        in_reply_to = email.get("in_reply_to", "")   # extracted from email headers
+
+        lead = None
+        matched_email_record = None
+
+        # --- Primary Match: via Message-ID threading header ---
+        # If the inbound email has an In-Reply-To header, look for the original outbound record
+        if in_reply_to:
+            matched_email_record = await db.emails.find_one({"user_id": user_id, "message_id": in_reply_to})
+            if matched_email_record:
+                lead_id = matched_email_record.get("lead_id")
+                if lead_id:
+                    from bson import ObjectId
+                    try:
+                        lead = await db.leads.find_one({"_id": ObjectId(lead_id)})
+                    except Exception:
+                        lead = None
+
+        # --- Fallback Match: by sender email address ---
+        if not lead:
+            lead = await db.leads.find_one({"email": {"$regex": f"^{sender_email}$", "$options": "i"}})
+
+        if not lead:
+            continue
+
+        # --- AI Sentiment Classification (UNCHANGED) ---
+        reply_status = lead.get("reply_status")
+        if not reply_status:
+            logger.info(f"Classifying email from known lead: {sender_email}")
+            reply_status = await classify_email_sentiment(body_text)
+
+        # --- Update leads collection: sentiment status + raw reply body ---
+        await db.leads.update_one(
+            {"_id": lead["_id"]},
+            {"$set": {
+                "reply_status": reply_status,
+                "last_reply_body": body_text,
+            }}
+        )
+
+        # --- Update emails collection: write reply_body into the matched outbound record ---
+        if matched_email_record:
+            await db.emails.update_one(
+                {"_id": matched_email_record["_id"]},
+                {"$set": {
+                    "reply_body": body_text,
+                    "reply_status": reply_status,
+                    "status": "replied",
+                }}
+            )
+            logger.info(f"Reply matched to campaign {matched_email_record.get('campaign_id')} for lead {sender_email}")
+        else:
+            # No specific campaign email record found — still log against lead's email address
+            logger.info(f"Reply from {sender_email} matched by sender address (no Message-ID match). Sentiment: {reply_status}")
+
+        # Attach status to email object for live Inbox frontend display
+        email["lead_status"] = reply_status
+
+    return emails
+
 @router.get("/email/messages")
 async def get_email_messages(folder: str = "inbox", current_user: dict = Depends(get_current_user)):
     """Fetch real-time emails for the logged-in user if they have an email integration."""
@@ -268,6 +363,9 @@ async def get_email_messages(folder: str = "inbox", current_user: dict = Depends
                         logger.info("Successfully saved refreshed Google Workspace OAuth credentials to MongoDB.")
             
             emails = await fetch_emails_via_gmail_api(access_token, folder=folder)
+            if folder == "inbox":
+                emails = await _process_incoming_emails(emails, current_user["user_id"])
+                
             return {
                 "success": True,
                 "connected": True,
@@ -291,6 +389,9 @@ async def get_email_messages(folder: str = "inbox", current_user: dict = Depends
             host=email_creds.get("host", ""),
             folder=folder
         )
+        if folder == "inbox":
+            emails = await _process_incoming_emails(emails, current_user["user_id"])
+            
         return {
             "success": True,
             "connected": True,

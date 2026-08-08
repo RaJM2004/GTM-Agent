@@ -38,6 +38,7 @@ class LeadForScoring(BaseModel):
 class ICPScoringRequest(BaseModel):
     leads: List[LeadForScoring]
     original_query: str = ""
+    user_id: str = ""
 
 class ICPScoreResult(BaseModel):
     score: float = 0.0
@@ -58,6 +59,10 @@ async def discover_leads(request: DiscoveryRequest):
     Example prompt: "Find 50 founders of AI companies with 5+ years of experience in Hyderabad"
     """
     try:
+        from services.billing import check_and_deduct_credits, TOKEN_COSTS
+        # Check if they have at least 1 credit before spending time on discovery
+        await check_and_deduct_credits(request.user_id, "LEAD_DISCOVERY", amount=TOKEN_COSTS["LEAD_DISCOVERY"], dry_run=True)
+        
         logger.info(f"[API] Discovery request: {request.prompt}")
         result = await engine.discover(request)
         
@@ -65,8 +70,14 @@ async def discover_leads(request: DiscoveryRequest):
         from database import save_leads
         await save_leads(result.leads, request.prompt, request.user_id)
         
+        # Deduct the exact number of leads found
+        if result.leads:
+            await check_and_deduct_credits(request.user_id, "LEAD_DISCOVERY", amount=len(result.leads) * TOKEN_COSTS["LEAD_DISCOVERY"])
+            
         logger.info(f"[API] Discovery complete: {result.total_found} leads found")
         return result
+    except HTTPException as he:
+        raise he
     except ValueError as ve:
         logger.warning(f"[API] Discovery validation failed: {ve}")
         raise HTTPException(status_code=400, detail=str(ve))
@@ -90,6 +101,11 @@ async def score_icp(request: ICPScoringRequest):
     try:
         from config import settings
         from groq import AsyncGroq
+        from services.billing import check_and_deduct_credits, TOKEN_COSTS
+        
+        # Deduct credits for the enrichment processing (1 batch = 3 credits)
+        if request.user_id:
+            await check_and_deduct_credits(request.user_id, "WEB_ENRICHMENT", amount=TOKEN_COSTS["WEB_ENRICHMENT"], dry_run=False)
 
         if not settings.GROQ_API_KEY:
             # Fallback: heuristic scoring without AI

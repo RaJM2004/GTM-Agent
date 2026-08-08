@@ -1,11 +1,14 @@
 """
 Email Finder - Attempts to discover/guess email addresses for leads
 using common email patterns and domain-based lookups.
+Includes real-time email verification via a locally hosted Reacher Docker container.
 """
 
 import logging
 import re
+import asyncio
 from typing import Optional, List
+
 import httpx
 
 from config import settings
@@ -23,6 +26,12 @@ EMAIL_PATTERNS = [
     "{last}@{domain}",
     "{f}.{last}@{domain}",
 ]
+
+# Reacher API returns one of these reachability statuses.
+# "safe"  → mailbox confirmed to accept mail
+# "risky" → catch-all / grey-listed, still usable
+# "invalid" / "unknown" → do not use
+REACHER_USABLE_STATUSES = {"safe", "risky"}
 
 
 class EmailFinder:
@@ -92,6 +101,87 @@ class EmailFinder:
             return 0.8
         
         return 0.5
+
+    async def verify_email_exists(self, email: str) -> bool:
+        """
+        Verify whether an email address actually exists using the locally hosted
+        Reacher Docker container (https://github.com/reacherhq/check-if-email-exists).
+
+        Reacher performs an SMTP handshake with the mail server without sending
+        a real email to check inbox existence. No external API key required.
+
+        Run the container before using this:
+            docker run -p 8080:8080 reacherhq/check-if-email-exists
+
+        Returns:
+            True  → email is safe or risky (usable in campaigns)
+            False → email is invalid/unknown, or Reacher is unreachable
+        """
+        if not email or "@" not in email:
+            return False
+
+        reacher_url = f"{settings.REACHER_API_URL.rstrip('/')}/v0/check_email"
+        payload = {"to_email": email}
+
+        try:
+            response = await self.client.post(reacher_url, json=payload, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+
+            reachability = data.get("is_reachable", "unknown")
+            logger.info(f"[Reacher] {email} → is_reachable={reachability}")
+
+            return reachability in REACHER_USABLE_STATUSES
+
+        except httpx.ConnectError:
+            logger.warning(
+                f"[Reacher] Docker container not running at {settings.REACHER_API_URL}. "
+                "Skipping verification for this email. "
+                "Start it with: docker run -p 8080:8080 reacherhq/check-if-email-exists"
+            )
+            return False
+        except httpx.TimeoutException:
+            logger.warning(f"[Reacher] Timeout verifying {email}. Skipping.")
+            return False
+        except Exception as e:
+            logger.error(f"[Reacher] Unexpected error verifying {email}: {e}")
+            return False
+
+    async def get_verified_email(self, name: str, domain: str) -> tuple[Optional[str], bool]:
+        """
+        Generate all possible email permutations for a person, verify each one
+        against the local Reacher instance in parallel, and return the first that
+        passes verification.
+
+        Falls back to the highest-scored guess (no verification) if Reacher is
+        not running or none of the permutations pass.
+
+        Args:
+            name:   Full name of the person (e.g., "John Smith")
+            domain: Company domain (e.g., "acmecorp.com")
+
+        Returns:
+            A tuple of (email, is_verified).
+        """
+        candidates = self.generate_possible_emails(name, domain)
+        if not candidates:
+            return None, False
+
+        logger.info(f"[EmailFinder] Verifying {len(candidates)} email permutations for '{name}' @ '{domain}'")
+
+        # Run all verifications concurrently for speed
+        verification_tasks = [self.verify_email_exists(email) for email in candidates]
+        results = await asyncio.gather(*verification_tasks, return_exceptions=True)
+
+        for email, result in zip(candidates, results):
+            if result is True:
+                logger.info(f"[EmailFinder] ✓ Verified email found: {email}")
+                return email, True
+
+        # Reacher unavailable or no email passed — fall back to best heuristic guess
+        logger.info(f"[EmailFinder] No email verified by Reacher, falling back to best-scored guess for {name}.")
+        best_email = max(candidates, key=self.score_email, default=None)
+        return best_email, False
 
     async def close(self):
         await self.client.aclose()

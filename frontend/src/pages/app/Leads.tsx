@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Download, Plus, MoreHorizontal, UserCircle, Building2, Phone, Mail, FolderOpen, ChevronDown, ChevronRight, Loader2, Trash2, Users, Globe, ExternalLink, RefreshCw, Bot, Laptop, HeartPulse, Wallet, Cloud, GraduationCap, ShoppingCart, Building, Link as LinkIcon, Folder, Upload } from 'lucide-react';
+import { Search, Filter, Download, Plus, MoreHorizontal, UserCircle, Building2, Phone, Mail, FolderOpen, ChevronDown, ChevronRight, Loader2, Trash2, Users, Globe, ExternalLink, RefreshCw, Bot, Laptop, HeartPulse, Wallet, Cloud, GraduationCap, ShoppingCart, Building, Link as LinkIcon, Folder, Upload, MessageSquare, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 interface Lead {
+  id?: string;
   name: string;
   title: string;
   company: string;
@@ -17,6 +18,10 @@ interface Lead {
   source: string;
   discovery_prompt: string;
   company_size: string;
+  is_verified: boolean;
+  reply_status?: string;
+  last_reply_body?: string;
+  has_whatsapp?: boolean | null;
 }
 
 interface IndustryGroup {
@@ -55,6 +60,50 @@ export default function Leads() {
   const [expandedIndustries, setExpandedIndustries] = useState<Set<string>>(new Set());
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [replyFilter, setReplyFilter] = useState<'All' | 'Positive' | 'Negative' | 'Neutral'>('All');
+  const [replyModalLead, setReplyModalLead] = useState<Lead | null>(null);
+  const [isDeletingLeads, setIsDeletingLeads] = useState(false);
+
+  const handleDeleteSelected = async () => {
+    const selectedIds = Array.from(selectedLeads);
+
+    if (selectedIds.length === 0) {
+      alert('Cannot delete: No valid IDs found for selected leads.');
+      return;
+    }
+
+    await handleDeleteBatch(selectedIds);
+  };
+
+  const handleDeleteBatch = async (ids: string[]) => {
+    if (!confirm(`Are you sure you want to delete ${ids.length} selected lead(s)?`)) return;
+
+    setIsDeletingLeads(true);
+    try {
+      const currentUserId = user?.user_id || 'user_12345_john_doe';
+      const res = await fetch(`http://localhost:8000/api/leads/delete-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: currentUserId, lead_ids: ids })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSelectedLeads(prev => {
+          const next = new Set(prev);
+          ids.forEach(id => next.delete(id));
+          return next;
+        });
+        fetchLeads();
+      } else {
+        alert(data.message || 'Failed to delete leads');
+      }
+    } catch (err) {
+      console.error('Batch delete failed:', err);
+      alert('Network error deleting leads');
+    } finally {
+      setIsDeletingLeads(false);
+    }
+  };
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -139,7 +188,7 @@ export default function Leads() {
   const selectAllInIndustry = (group: IndustryGroup) => {
     setSelectedLeads(prev => {
       const next = new Set(prev);
-      const allKeys = group.leads.map((l, i) => `${group.industry}-${i}`);
+      const allKeys = group.leads.filter(l => l.id).map(l => l.id as string);
       const allSelected = allKeys.every(k => next.has(k));
       if (allSelected) {
         allKeys.forEach(k => next.delete(k));
@@ -150,10 +199,16 @@ export default function Leads() {
     });
   };
 
-  // Filter leads based on search
+  // Filter leads based on search and reply status
   const filteredGroups = industryGroups.map(group => ({
     ...group,
     leads: group.leads.filter(lead => {
+      if (replyFilter !== 'All') {
+        if (replyFilter === 'Positive' && lead.reply_status !== 'Positive') return false;
+        if (replyFilter === 'Negative' && lead.reply_status !== 'Negative') return false;
+        if (replyFilter === 'Neutral' && lead.reply_status !== 'Neutral') return false;
+      }
+      
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
       return (
@@ -193,14 +248,41 @@ export default function Leads() {
             <Download className="w-4 h-4 mr-2" /> Export All CSV
           </button>
           {selectedLeads.size > 0 && (
-            <button 
-              onClick={() => navigate('/app/campaigns')}
-              className="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded-lg transition-colors shadow-sm font-medium"
-            >
-              <Plus className="w-4 h-4 mr-2" /> Add {selectedLeads.size} to Campaign
-            </button>
+            <>
+              <button 
+                onClick={handleDeleteSelected}
+                disabled={isDeletingLeads}
+                className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors shadow-sm font-medium disabled:opacity-50"
+              >
+                {isDeletingLeads ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />} 
+                Delete {selectedLeads.size} Leads
+              </button>
+              <button 
+                onClick={() => navigate('/app/campaigns')}
+                className="flex items-center px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded-lg transition-colors shadow-sm font-medium"
+              >
+                <Plus className="w-4 h-4 mr-2" /> Add {selectedLeads.size} to Campaign
+              </button>
+            </>
           )}
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-4 border-b border-[#F2DED6]">
+        {['All', 'Positive', 'Negative', 'Neutral'].map(tab => (
+          <button
+            key={tab}
+            onClick={() => setReplyFilter(tab as any)}
+            className={`px-2 py-3 text-sm font-semibold border-b-2 transition-colors ${
+              replyFilter === tab 
+                ? 'border-primary text-primary' 
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {tab} {tab !== 'All' ? 'Replies' : 'Leads'}
+          </button>
+        ))}
       </div>
 
       {/* Search & Stats Row */}
@@ -310,12 +392,22 @@ export default function Leads() {
                       <Plus className="w-3.5 h-3.5 mr-1.5" /> {allSelected ? 'Deselect All' : 'Select All'}
                     </button>
                     <button
-                      onClick={() => handleDeleteIndustry(group.industry)}
-                      disabled={deleting === group.industry}
+                      onClick={() => {
+                        const selectedInGroupIds = group.leads.filter(l => l.id && selectedLeads.has(l.id)).map(l => l.id as string);
+                        if (selectedInGroupIds.length > 0) {
+                          handleDeleteBatch(selectedInGroupIds);
+                        } else {
+                          handleDeleteIndustry(group.industry);
+                        }
+                      }}
+                      disabled={deleting === group.industry || isDeletingLeads}
                       className="flex items-center px-3 py-1.5 bg-white border border-red-200 text-red-600 text-xs rounded-lg hover:bg-red-50 transition-colors shadow-sm disabled:opacity-50"
                     >
-                      {deleting === group.industry ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 mr-1.5" />}
-                      Delete
+                      {deleting === group.industry || isDeletingLeads ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5 mr-1.5" />}
+                      {(() => {
+                        const count = group.leads.filter(l => l.id && selectedLeads.has(l.id)).length;
+                        return count > 0 ? `Delete ${count}` : 'Delete';
+                      })()}
                     </button>
                   </div>
                 </div>
@@ -339,24 +431,22 @@ export default function Leads() {
                           <th scope="col" className="px-5 py-3">Company</th>
                           <th scope="col" className="px-5 py-3">Location</th>
                           <th scope="col" className="px-5 py-3">Quality</th>
+                          <th scope="col" className="px-5 py-3">Reply Status</th>
                           <th scope="col" className="px-5 py-3">Source</th>
                         </tr>
                       </thead>
                       <tbody>
                         {group.leads.map((lead, idx) => {
-                          const leadKey = `${group.industry}-${idx}`;
-                          const isSelected = selectedLeads.has(leadKey);
-
                           return (
                             <tr 
-                              key={idx} 
-                              className={`border-b border-[#F2DED6]/50 hover:bg-[#FDF8F5] transition-colors ${isSelected ? 'bg-primary/5' : ''}`}
+                              key={lead.id || idx} 
+                              className={`border-b border-[#F2DED6]/50 hover:bg-[#FDF8F5] transition-colors ${!!lead.id && selectedLeads.has(lead.id) ? 'bg-primary/5' : ''}`}
                             >
                               <td className="w-4 p-4">
                                 <input 
                                   type="checkbox" 
-                                  checked={isSelected}
-                                  onChange={() => toggleLeadSelection(leadKey)}
+                                  checked={!!lead.id && selectedLeads.has(lead.id)}
+                                  onChange={() => lead.id && toggleLeadSelection(lead.id)}
                                   className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary" 
                                 />
                               </td>
@@ -374,17 +464,32 @@ export default function Leads() {
                               <td className="px-5 py-3">
                                 <div className="flex flex-col gap-1">
                                   {lead.email && (
-                                    <div className="flex items-center gap-1.5 text-xs">
+                                    <div className="flex items-center gap-1.5 text-xs flex-wrap">
                                       <Mail className="w-3 h-3 text-gray-400 shrink-0" />
-                                      <a href={`mailto:${lead.email}`} className="text-gray-700 hover:text-primary truncate max-w-[180px]" title={lead.email}>
+                                      <a href={`mailto:${lead.email}`} className="text-gray-700 hover:text-primary truncate max-w-[150px]" title={lead.email}>
                                         {lead.email}
                                       </a>
+                                      {lead.is_verified && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 ml-1 whitespace-nowrap">
+                                          ✓ Verified
+                                        </span>
+                                      )}
                                     </div>
                                   )}
                                   {lead.phone && (
                                     <div className="flex items-center gap-1.5 text-xs">
                                       <Phone className="w-3 h-3 text-gray-400 shrink-0" />
                                       <span className="text-gray-500 font-mono">{lead.phone}</span>
+                                      {lead.has_whatsapp === true && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 ml-1">
+                                          WhatsApp Verified
+                                        </span>
+                                      )}
+                                      {lead.has_whatsapp === false && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200 ml-1">
+                                          No WhatsApp
+                                        </span>
+                                      )}
                                     </div>
                                   )}
                                   {lead.linkedin_url && (
@@ -429,6 +534,31 @@ export default function Leads() {
                                 </div>
                               </td>
                               <td className="px-5 py-3">
+                                <div className="flex items-center gap-2">
+                                  {lead.reply_status ? (
+                                    <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                                      lead.reply_status === 'Positive' ? 'bg-green-100 text-green-700' :
+                                      lead.reply_status === 'Negative' ? 'bg-red-100 text-red-700' :
+                                      'bg-gray-100 text-gray-700'
+                                    }`}>
+                                      {lead.reply_status}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">—</span>
+                                  )}
+                                  {lead.last_reply_body && (
+                                    <button
+                                      id={`reply-msg-btn-${lead.email?.replace(/[@.]/g, '-')}`}
+                                      title="View Reply Message"
+                                      onClick={() => setReplyModalLead(lead)}
+                                      className="p-1 rounded hover:bg-indigo-50 text-indigo-500 hover:text-indigo-700 transition-colors"
+                                    >
+                                      <MessageSquare size={14} />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-5 py-3">
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${
                                   lead.source?.includes('linkedin') ? 'bg-blue-50 text-blue-700 border-blue-200' :
                                   lead.source?.includes('maps') ? 'bg-green-50 text-green-700 border-green-200' :
@@ -449,6 +579,49 @@ export default function Leads() {
               </div>
             );
           })}
+        </div>
+      )}
+      {/* Reply Message Modal */}
+      {replyModalLead && (
+        <div
+          id="reply-message-modal-overlay"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setReplyModalLead(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full mx-4 relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-gray-900">{replyModalLead.name}</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{replyModalLead.email}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {replyModalLead.reply_status && (
+                  <span className={`text-xs px-2 py-1 rounded-full font-bold ${
+                    replyModalLead.reply_status === 'Positive' ? 'bg-green-100 text-green-700' :
+                    replyModalLead.reply_status === 'Negative' ? 'bg-red-100 text-red-700' :
+                    'bg-gray-100 text-gray-700'
+                  }`}>
+                    {replyModalLead.reply_status}
+                  </span>
+                )}
+                <button
+                  id="reply-message-modal-close"
+                  onClick={() => setReplyModalLead(null)}
+                  className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="border border-gray-100 rounded-xl bg-gray-50 p-4 max-h-72 overflow-y-auto">
+              <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                {replyModalLead.last_reply_body}
+              </p>
+            </div>
+          </div>
         </div>
       )}
     </div>

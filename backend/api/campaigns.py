@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 from pydantic import BaseModel
 from groq import AsyncGroq
 
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
 class ContentRequest(BaseModel):
+    user_id: str
     channel: str # linkedin, email, whatsapp, voice, sms
     objective: str # follow_up, engagement, product_launch, event_management
     action: str # post, dm
@@ -24,6 +25,7 @@ class ContentResponse(BaseModel):
     content: str
 
 class ImageRequest(BaseModel):
+    user_id: str
     content: str
 
 class ImageResponse(BaseModel):
@@ -36,6 +38,7 @@ class PublishRequest(BaseModel):
     image_url: Optional[str] = None
     accounts: list[str] = ["Account 1", "Account 2", "Account 3"]
     user_id: str
+    name: Optional[str] = None
 
 class DraftRequest(BaseModel):
     action: str
@@ -58,6 +61,45 @@ class EmailPublishRequest(BaseModel):
     user_id: str
     name: str
     method: str
+    leads: list[dict] = []
+
+class SmsSendRequest(BaseModel):
+    campaign_id: str
+    user_id: str
+    content: str
+    image_url: Optional[str] = None
+    leads: list[dict] = []
+
+class SmsPublishRequest(BaseModel):
+    action: str
+    content: str
+    image_url: Optional[str] = None
+    user_id: str
+    name: str
+    leads: list[dict] = []
+
+# ── Voice Campaign Models ─────────────────────────────────────────────────────
+
+class VoicePromptRefineRequest(BaseModel):
+    user_id: str
+    raw_prompt: str
+    product_name: str = ""
+    target_customer: str = ""
+    call_to_action: str = ""
+
+class VoicePublishRequest(BaseModel):
+    user_id: str
+    name: str
+    prompt: str  # The refined system prompt for the AI agent
+    first_message: str = "Hello! Thanks for taking my call."
+    leads: list[dict] = []  # [{name, phone}]
+    send_followup_sms: bool = True
+
+class VoiceDraftRequest(BaseModel):
+    user_id: str
+    name: str
+    prompt: str
+    first_message: str = "Hello! Thanks for taking my call."
     leads: list[dict] = []
 
 def get_groq_client():
@@ -92,6 +134,20 @@ async def generate_campaign_content(req: ContentRequest):
             response_format={"type": "json_object"}
         )
         
+        from services.billing import check_and_deduct_credits, TOKEN_COSTS
+        try:
+            channel = req.channel.lower()
+            if channel == "sms":
+                action = "AI_SMS_GENERATION"
+            elif channel == "linkedin":
+                action = "AI_LINKEDIN_GENERATION"
+            else:
+                action = "AI_EMAIL_GENERATION"
+                
+            await check_and_deduct_credits(req.user_id, action, amount=TOKEN_COSTS[action], dry_run=False)
+        except Exception:
+            pass # allow if no user context yet
+            
         raw_content = response.choices[0].message.content.strip()
         
         # Extract the 'message' from the JSON object to display in the frontend
@@ -129,6 +185,13 @@ async def generate_linkedin_image(req: ImageRequest):
             temperature=0.7,
             response_format={"type": "json_object"}
         )
+        
+        from services.billing import check_and_deduct_credits, TOKEN_COSTS
+        try:
+            await check_and_deduct_credits(req.user_id, "IMAGE_GENERATION", amount=TOKEN_COSTS["IMAGE_GENERATION"], dry_run=False)
+        except Exception:
+            pass
+            
         raw_content = response.choices[0].message.content.strip()
         
         # Parse the JSON and extract the image_prompt (<=20 words)
@@ -178,6 +241,9 @@ async def publish_linkedin_campaign(req: PublishRequest):
     
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
+        
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+    await check_and_deduct_credits(req.user_id, "LINKEDIN_POST", amount=TOKEN_COSTS["LINKEDIN_POST"], dry_run=False)
         
     # 1. Fetch the user's LinkedIn Token from MongoDB
     user = await db.users.find_one({"user_id": req.user_id})
@@ -284,7 +350,7 @@ async def publish_linkedin_campaign(req: PublishRequest):
         import datetime
         new_campaign = {
             "user_id": req.user_id,
-            "name": req.content[:30].strip() + "..." if len(req.content) > 30 else req.content.strip(),
+            "name": req.name if req.name else (req.content[:30].strip() + "..." if len(req.content) > 30 else req.content.strip()),
             "status": "Active",
             "type": "LinkedIn",
             "progress": 100,
@@ -298,6 +364,14 @@ async def publish_linkedin_campaign(req: PublishRequest):
             "action": req.action
         }
         await db.campaigns.insert_one(new_campaign)
+        
+        from services.notifications import create_notification
+        await create_notification(
+            user_id=req.user_id,
+            title="Campaign Published",
+            message=f"LinkedIn campaign '{new_campaign['name']}' has been published.",
+            notif_type="success"
+        )
 
     return {"status": "success", "message": "Successfully published directly to your live LinkedIn account (with image)!"}
 
@@ -314,7 +388,42 @@ async def get_campaigns(user_id: str):
         c["id"] = str(c["_id"])
         del c["_id"]
         
+        # Check if audience is missing but emails were sent
+        if (not c.get("audience")) and c.get("type", "").lower() == "email" and c.get("sent", 0) > 0:
+            emails_cursor = db.emails.find({"campaign_id": c["id"]})
+            emails = await emails_cursor.to_list(length=1000)
+            if emails:
+                audience = []
+                for email_doc in emails:
+                    lead_email = email_doc.get("lead_email")
+                    # Try to fetch lead name
+                    lead = await db.leads.find_one({"email": lead_email, "user_id": user_id})
+                    name = lead.get("name", "Unknown") if lead else "Unknown"
+                    audience.append({"name": name, "contact": lead_email})
+                
+                c["audience"] = audience
+                # Update DB so we don't have to compute this next time
+                from bson.objectid import ObjectId
+                await db.campaigns.update_one({"_id": ObjectId(c["id"])}, {"$set": {"audience": audience}})
+
     return campaigns
+
+@router.delete("/{campaign_id}")
+async def delete_campaign(campaign_id: str):
+    from database import db
+    from bson.objectid import ObjectId
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    try:
+        result = await db.campaigns.delete_one({"_id": ObjectId(campaign_id)})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        return {"status": "success", "message": "Campaign deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete campaign")
 
 @router.post("/linkedin/draft")
 async def save_linkedin_draft(req: DraftRequest):
@@ -372,6 +481,10 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
     import re
     import time
     from services.email_fetcher import refresh_gmail_token
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+    
+    # Pre-flight check: Make sure they have at least enough tokens for emails
+    await check_and_deduct_credits(user_id, "EMAIL_SEND", amount=TOKEN_COSTS["EMAIL_SEND"], dry_run=True)
     
     # Pre-refresh Gmail token if needed
     if method.lower() == "gmail" and creds.get("auth_type") == "oauth":
@@ -393,28 +506,32 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
                 except Exception as e:
                     logger.error(f"Failed to refresh gmail token in dispatcher: {e}")
 
+    import datetime
+    from services.personalization import personalize_email_content
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+
     for lead in leads:
         lead_email = lead.get("email")
         if not lead_email:
             continue
-            
+
         lead_name = lead.get("name") or "there"
-        personalized_content = content
-        
-        # Replace common placeholders with the lead's name
-        patterns = [r"\{\{name\}\}", r"\[name\]", r"\[client name\]", r"\[first name\]", r"<name>", r"\{\{first_name\}\}", r"\[recipient name\]"]
-        for p in patterns:
-            personalized_content = re.sub(p, lead_name, personalized_content, flags=re.IGNORECASE)
-        
+        sender_name = user.get("name", "Sales Team")
+
+        # Use AI to perfectly craft the email for this specific lead
+        personalized_content = await personalize_email_content(content, lead, sender_name)
+        await check_and_deduct_credits(user_id, "AI_EMAIL_GENERATION", amount=TOKEN_COSTS["AI_EMAIL_GENERATION"], dry_run=False)
+
+        send_result = None
         if method.lower() == "gmail":
-            success = await send_email_via_gmail_api(
+            send_result = await send_email_via_gmail_api(
                 access_token=creds.get("access_token"),
                 to=lead_email,
                 subject=subject,
                 body=personalized_content
             )
         else:
-            success = await send_email_via_smtp(
+            send_result = await send_email_via_smtp(
                 email=creds.get("email"),
                 password=creds.get("password"),
                 host=creds.get("host", "smtp.gmail.com"),
@@ -423,16 +540,49 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
                 subject=subject,
                 body=personalized_content
             )
-            
-        if success:
+
+        # send_result is a dict: {"success": bool, "message_id": str|None}
+        if send_result and send_result.get("success"):
             successful_sends += 1
-            
+            await check_and_deduct_credits(user_id, "EMAIL_SEND", amount=TOKEN_COSTS["EMAIL_SEND"], dry_run=False)
+
+            message_id = send_result.get("message_id")
+
+            if db is not None:
+                try:
+                    # Mark lead as emailed so we can filter for reply tracking later
+                    await db.leads.update_many(
+                        {"email": lead_email, "user_id": user_id},
+                        {"$set": {"emailed_via_gtm": True}}
+                    )
+
+                    # Insert a record into the emails collection linking this send to the campaign
+                    # We'll use this record to match inbound replies via In-Reply-To == message_id
+                    lead_doc = await db.leads.find_one({"email": lead_email, "user_id": user_id})
+                    email_record = {
+                        "user_id": user_id,
+                        "campaign_id": None,   # filled in by the caller (send/publish route)
+                        "lead_id": str(lead_doc["_id"]) if lead_doc else None,
+                        "lead_email": lead_email,
+                        "message_id": message_id,
+                        "subject": subject,
+                        "body": personalized_content,
+                        "status": "sent",
+                        "reply_body": None,
+                        "reply_status": None,
+                        "sent_at": datetime.datetime.utcnow(),
+                    }
+                    await db.emails.insert_one(email_record)
+                    logger.info(f"Email record saved for lead {lead_email} (Message-ID: {message_id})")
+                except Exception as e:
+                    logger.error(f"Failed to update lead/email record for {lead_email}: {e}")
+
     return successful_sends
 
 @router.post("/email/send")
 async def send_email_campaign(req: EmailSendRequest):
     logger.info(f"Sending email campaign '{req.subject}' to {len(req.leads)} leads via {req.method}.")
-    
+
     try:
         successful_sends = await _dispatch_emails(
             user_id=req.user_id,
@@ -440,6 +590,186 @@ async def send_email_campaign(req: EmailSendRequest):
             subject=req.subject,
             content=req.content,
             method=req.method
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    from database import db
+    from bson.objectid import ObjectId
+    if db is not None:
+        try:
+            new_audience_members = [{"name": l.get("name", ""), "contact": l.get("email", "")} for l in req.leads]
+            await db.campaigns.update_one(
+                {"_id": ObjectId(req.campaign_id)},
+                {
+                    "$inc": {"sent": successful_sends}, 
+                    "$set": {"status": "Active"},
+                    "$push": {"audience": {"$each": new_audience_members}}
+                }
+            )
+            # Backfill campaign_id into all email records written during this dispatch
+            lead_emails = [l.get("email") for l in req.leads if l.get("email")]
+            await db.emails.update_many(
+                {"user_id": req.user_id, "campaign_id": None, "lead_email": {"$in": lead_emails}},
+                {"$set": {"campaign_id": req.campaign_id}}
+            )
+        except Exception as e:
+            logger.error(f"Failed to update campaign sent count or backfill campaign_id: {e}")
+
+    return {
+        "status": "success",
+        "message": f"Successfully sent email campaign to {successful_sends} out of {len(req.leads)} contacts!"
+    }
+
+@router.post("/email/publish")
+async def publish_email_campaign(req: EmailPublishRequest):
+    from database import db
+    import datetime
+
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+
+    logger.info(f"Publishing email campaign '{req.name}' to {len(req.leads)} leads via {req.method}.")
+
+    try:
+        successful_sends = await _dispatch_emails(
+            user_id=req.user_id,
+            leads=req.leads,
+            subject=req.name,
+            content=req.content,
+            method=req.method
+        )
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
+
+    new_campaign = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Active",
+        "type": "Email",
+        "progress": 100,
+        "sent": successful_sends,
+        "replied": 0,
+        "booked": 0,
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "content": req.content,
+        "action": req.action,
+        "audience": [{"name": l.get("name", ""), "contact": l.get("email", "")} for l in req.leads]
+    }
+
+    result = await db.campaigns.insert_one(new_campaign)
+    campaign_id_str = str(result.inserted_id)
+
+    # Backfill campaign_id into all email records written during this dispatch
+    try:
+        lead_emails = [l.get("email") for l in req.leads if l.get("email")]
+        await db.emails.update_many(
+            {"user_id": req.user_id, "campaign_id": None, "lead_email": {"$in": lead_emails}},
+            {"$set": {"campaign_id": campaign_id_str}}
+        )
+    except Exception as e:
+        logger.error(f"Failed to backfill campaign_id in emails collection: {e}")
+
+    from services.notifications import create_notification
+    await create_notification(
+        user_id=req.user_id,
+        title="Campaign Completed",
+        message=f"Email campaign '{req.name}' successfully sent to {successful_sends} contacts.",
+        notif_type="success"
+    )
+
+    return {"status": "success", "message": f"Successfully published and sent email campaign to {successful_sends} contacts!"}
+
+async def _dispatch_sms(user_id: str, leads: list, content: str, image_url: str = None, campaign_id: str = None) -> int:
+    from database import db
+    from services.sms_sender import send_sms_via_twilio
+    import os
+    from config import settings
+    
+    user = await db.users.find_one({"user_id": user_id})
+    logger.info(f"Dispatching SMS for user {user_id}. Leads count: {len(leads)}")
+    if not user or "integrations" not in user or "twilio" not in user["integrations"]:
+        logger.warning(f"User {user_id} not found or Twilio not connected.")
+        raise ValueError("Twilio account is not connected. Please go to Integrations and connect your Twilio account.")
+        
+    creds = user["integrations"]["twilio"]
+    account_sid = creds.get("account_sid")
+    auth_token = creds.get("auth_token")
+    from_number = creds.get("from_number")
+    
+    if not account_sid or not auth_token or not from_number:
+        raise ValueError("Incomplete Twilio credentials. Please check your Integrations.")
+        
+    successful_sends = 0
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+    await check_and_deduct_credits(user_id, "SMS_SEND", amount=TOKEN_COSTS["SMS_SEND"], dry_run=True)
+    
+    for lead in leads:
+        lead_phone = lead.get("phone")
+        if not lead_phone:
+            continue
+            
+        # Basic personalization replacement if needed (can be extended to AI)
+        lead_name = lead.get("name", "there")
+        personalized_content = content.replace("[Name]", lead_name).replace("{Name}", lead_name)
+        
+        # Format image URL for Twilio
+        formatted_media_url = None
+        if image_url:
+            if image_url.startswith("http") and "localhost" not in image_url:
+                formatted_media_url = image_url
+            else:
+                # Twilio cannot reach localhost URLs. For local testing, we fallback to a public placeholder.
+                # In production, this would be the actual deployed URL (e.g., https://yourdomain.com/static/...)
+                formatted_media_url = "https://images.unsplash.com/photo-1611162617474-5b21e879e113?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+
+        success = await send_sms_via_twilio(
+            account_sid=account_sid,
+            auth_token=auth_token,
+            from_number=from_number,
+            to=lead_phone,
+            body=personalized_content,
+            media_url=formatted_media_url
+        )
+            
+        if success:
+            successful_sends += 1
+            await check_and_deduct_credits(user_id, "SMS_SEND", amount=TOKEN_COSTS["SMS_SEND"], dry_run=False)
+            
+            # Mark the lead as SMSed
+            if db is not None:
+                try:
+                    import datetime
+                    await db.sms_logs.insert_one({
+                        "user_id": user_id,
+                        "campaign_id": campaign_id,
+                        "lead_phone": lead_phone,
+                        "lead_name": lead_name,
+                        "content": personalized_content,
+                        "status": "sent",
+                        "sent_at": datetime.datetime.utcnow()
+                    })
+                    await db.leads.update_many(
+                        {"phone": lead_phone, "user_id": user_id},
+                        {"$set": {"sms_sent_via_gtm": True}}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to update sms_sent_via_gtm for {lead_phone}: {e}")
+            
+    return successful_sends
+
+@router.post("/sms/send")
+async def send_sms_campaign(req: SmsSendRequest):
+    logger.info(f"Sending SMS campaign to {len(req.leads)} leads.")
+    
+    try:
+        successful_sends = await _dispatch_sms(
+            user_id=req.user_id,
+            leads=req.leads,
+            content=req.content,
+            image_url=req.image_url,
+            campaign_id=req.campaign_id
         )
     except ValueError as e:
         return {"status": "error", "message": str(e)}
@@ -457,26 +787,25 @@ async def send_email_campaign(req: EmailSendRequest):
 
     return {
         "status": "success", 
-        "message": f"Successfully sent email campaign to {successful_sends} out of {len(req.leads)} contacts!"
+        "message": f"Successfully sent SMS campaign to {successful_sends} out of {len(req.leads)} contacts!"
     }
 
-@router.post("/email/publish")
-async def publish_email_campaign(req: EmailPublishRequest):
+@router.post("/sms/publish")
+async def publish_sms_campaign(req: SmsPublishRequest):
     from database import db
     import datetime
     
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
         
-    logger.info(f"Publishing email campaign '{req.name}' to {len(req.leads)} leads via {req.method}.")
+    logger.info(f"Publishing SMS campaign '{req.name}' to {len(req.leads)} leads.")
     
     try:
-        successful_sends = await _dispatch_emails(
+        successful_sends = await _dispatch_sms(
             user_id=req.user_id,
             leads=req.leads,
-            subject=req.name,
             content=req.content,
-            method=req.method
+            image_url=req.image_url
         )
     except ValueError as e:
         return {"status": "error", "message": str(e)}
@@ -485,7 +814,7 @@ async def publish_email_campaign(req: EmailPublishRequest):
         "user_id": req.user_id,
         "name": req.name,
         "status": "Active",
-        "type": "Email",
+        "type": "SMS",
         "progress": 100,
         "sent": successful_sends,
         "replied": 0,
@@ -493,9 +822,487 @@ async def publish_email_campaign(req: EmailPublishRequest):
         "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
         "created_at": datetime.datetime.utcnow(),
         "content": req.content,
-        "action": req.action
+        "image_url": req.image_url,
+        "action": req.action,
+        "audience": [{"name": l.get("name", ""), "contact": l.get("phone", "")} for l in req.leads]
+    }
+    
+    result = await db.campaigns.insert_one(new_campaign)
+    campaign_id_str = str(result.inserted_id)
+    
+    # Backfill campaign_id into all SMS records written during this dispatch
+    lead_phones = [l.get("phone") for l in req.leads if l.get("phone")]
+    await db.sms_logs.update_many(
+        {"user_id": req.user_id, "campaign_id": None, "lead_phone": {"$in": lead_phones}},
+        {"$set": {"campaign_id": campaign_id_str}}
+    )
+    
+    from services.notifications import create_notification
+    await create_notification(
+        user_id=req.user_id,
+        title="Campaign Completed",
+        message=f"SMS campaign '{req.name}' successfully sent to {successful_sends} contacts.",
+        notif_type="success"
+    )
+    
+    return {"status": "success", "message": f"Successfully published and sent SMS campaign to {successful_sends} contacts!"}
+
+@router.get("/sms/logs")
+async def get_sms_logs(campaign_id: str):
+    from database import db
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    logs = await db.sms_logs.find({"campaign_id": campaign_id}).sort("sent_at", -1).to_list(1000)
+    for log in logs:
+        log["id"] = str(log["_id"])
+        del log["_id"]
+        
+    return {"status": "success", "logs": logs}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VOICE CALL CAMPAIGN ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/voice/refine-prompt")
+async def refine_voice_prompt_endpoint(req: VoicePromptRefineRequest):
+    """Refines a user's raw voice prompt into a professional AI agent script."""
+    from services.vapi_service import refine_voice_prompt
+    
+    try:
+        from services.billing import check_and_deduct_credits, TOKEN_COSTS
+        
+        await check_and_deduct_credits(req.user_id, "AI_VOICE_PROMPT_GENERATION", amount=TOKEN_COSTS["AI_VOICE_PROMPT_GENERATION"], dry_run=False)
+        
+        refined = await refine_voice_prompt(
+            raw_prompt=req.raw_prompt,
+            product_name=req.product_name,
+            target_customer=req.target_customer,
+            call_to_action=req.call_to_action,
+        )
+        return {"status": "success", "refined_prompt": refined}
+    except Exception as e:
+        logger.error(f"Failed to refine voice prompt: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/voice/publish")
+async def publish_voice_campaign(req: VoicePublishRequest):
+    """
+    Publishes and launches a voice call campaign.
+    Creates a per-user VAPI assistant, then calls each lead sequentially.
+    Runs the calling loop as a background task.
+    """
+    from database import db, save_call_log
+    from services.vapi_service import (
+        create_or_update_assistant,
+        make_outbound_call,
+        poll_call_status,
+        process_call_transcript,
+    )
+    from services.sms_sender import send_sms_via_twilio
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+    import datetime
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    # 1. Get user's Twilio credentials from MongoDB
+    user = await db.users.find_one({"user_id": req.user_id})
+    if not user or "integrations" not in user or "twilio" not in user["integrations"]:
+        return {
+            "status": "error",
+            "message": "Twilio account is not connected. Please go to Integrations and connect your Twilio account."
+        }
+    
+    twilio_creds = user["integrations"]["twilio"]
+    account_sid = twilio_creds.get("account_sid")
+    auth_token = twilio_creds.get("auth_token")
+    from_number = twilio_creds.get("from_number")
+    
+    if not account_sid or not auth_token or not from_number:
+        return {
+            "status": "error",
+            "message": "Incomplete Twilio credentials. Please check your Integrations."
+        }
+    
+    # 2. Check credits
+    try:
+        await check_and_deduct_credits(req.user_id, "VOICE_CALL_MINUTE", amount=TOKEN_COSTS["VOICE_CALL_MINUTE"], dry_run=True)
+    except Exception:
+        pass  # Allow if billing not fully set up
+    
+    # 3. Create/update per-user VAPI assistant with the refined prompt
+    try:
+        assistant_id = await create_or_update_assistant(
+            user_id=req.user_id,
+            system_prompt=req.prompt,
+            assistant_name=req.name,
+            first_message=req.first_message,
+        )
+    except Exception as e:
+        logger.error(f"Failed to create VAPI assistant: {e}", exc_info=True)
+        return {"status": "error", "message": f"Failed to set up voice agent: {str(e)}"}
+    
+    # 4. Create campaign record in MongoDB
+    campaign_doc = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Active",
+        "type": "Voice",
+        "progress": 0,
+        "sent": 0,
+        "replied": 0,
+        "booked": 0,
+        "total_leads": len(req.leads),
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "prompt": req.prompt,
+        "first_message": req.first_message,
+        "assistant_id": assistant_id,
+        "action": "call",
+    }
+    result = await db.campaigns.insert_one(campaign_doc)
+    campaign_id = str(result.inserted_id)
+    
+    # 5. Launch calls as a background task
+    import asyncio
+    
+    async def _run_voice_campaign():
+        """Background task: call each lead sequentially."""
+        from bson.objectid import ObjectId
+        successful_calls = 0
+        positive_count = 0
+        
+        for idx, lead in enumerate(req.leads):
+            lead_name = lead.get("name", "there")
+            lead_phone = lead.get("phone", "")
+            
+            if not lead_phone:
+                logger.warning(f"Skipping lead {lead_name}: no phone number")
+                continue
+            
+            logger.info(f"[Voice Campaign {campaign_id}] Calling {idx+1}/{len(req.leads)}: {lead_name}")
+            
+            # Make the call
+            call_id, call_status = await make_outbound_call(
+                assistant_id=assistant_id,
+                phone=lead_phone,
+                name=lead_name,
+                twilio_account_sid=account_sid,
+                twilio_auth_token=auth_token,
+                twilio_from_number=from_number,
+            )
+            
+            # Save initial call log
+            call_log = {
+                "user_id": req.user_id,
+                "campaign_id": campaign_id,
+                "call_id": call_id or "",
+                "lead_name": lead_name,
+                "lead_phone": lead_phone,
+                "status": call_status,
+                "transcript": "",
+                "recording_url": "",
+                "summary": "",
+                "checklist": [],
+                "sentiment": "",
+                "sms_status": "",
+                "sms_content": "",
+                "duration": 0,
+                "created_at": datetime.datetime.utcnow(),
+            }
+            await save_call_log(call_log)
+            
+            if not call_id:
+                logger.error(f"Call to {lead_name} failed to initiate: {call_status}")
+                continue
+            
+            # Poll for call completion
+            result_data = await poll_call_status(call_id, timeout=300)
+            
+            # Process transcript if available
+            transcript = result_data.get("transcript", "")
+            analysis = {"summary": "", "checklist": [], "sms_message": "", "sentiment": "Neutral"}
+            if transcript:
+                analysis = await process_call_transcript(transcript)
+            
+            # Update call log
+            from database import update_call_log
+            update_data = {
+                "status": result_data.get("status", "unknown"),
+                "transcript": transcript,
+                "recording_url": result_data.get("recording_url", ""),
+                "duration": result_data.get("duration", 0),
+                "summary": analysis.get("summary", ""),
+                "checklist": analysis.get("checklist", []),
+                "sentiment": analysis.get("sentiment", "Neutral"),
+                "ended_reason": result_data.get("ended_reason", ""),
+                "updated_at": datetime.datetime.utcnow(),
+            }
+            await update_call_log(call_id, update_data)
+            
+            successful_calls += 1
+            if analysis.get("sentiment") == "Positive":
+                positive_count += 1
+            
+            # Send follow-up SMS if enabled and transcript was captured
+            if req.send_followup_sms and analysis.get("sms_message"):
+                sms_success = await send_sms_via_twilio(
+                    account_sid=account_sid,
+                    auth_token=auth_token,
+                    from_number=from_number,
+                    to=lead_phone,
+                    body=analysis["sms_message"],
+                )
+                sms_update = {
+                    "sms_status": "sent" if sms_success else "failed",
+                    "sms_content": analysis["sms_message"],
+                }
+                await update_call_log(call_id, sms_update)
+            
+            # Deduct credits
+            try:
+                await check_and_deduct_credits(req.user_id, "VOICE_CALL_MINUTE", amount=TOKEN_COSTS["VOICE_CALL_MINUTE"], dry_run=False)
+            except Exception:
+                pass
+            
+            # Update campaign progress
+            progress = int(((idx + 1) / len(req.leads)) * 100)
+            try:
+                await db.campaigns.update_one(
+                    {"_id": ObjectId(campaign_id)},
+                    {"$set": {
+                        "sent": successful_calls,
+                        "booked": positive_count,
+                        "progress": progress,
+                    }}
+                )
+            except Exception as e:
+                logger.error(f"Failed to update campaign progress: {e}")
+            
+            # Small delay between calls to avoid rate limits
+            await asyncio.sleep(2)
+        
+        # Mark campaign as completed
+        try:
+            await db.campaigns.update_one(
+                {"_id": ObjectId(campaign_id)},
+                {"$set": {
+                    "progress": 100,
+                    "sent": successful_calls,
+                    "booked": positive_count,
+                    "status": "Completed" if successful_calls > 0 else "Failed",
+                }}
+            )
+        except Exception as e:
+            logger.error(f"Failed to finalize campaign: {e}")
+        
+        logger.info(f"[Voice Campaign {campaign_id}] Completed. {successful_calls}/{len(req.leads)} calls made.")
+        
+        from services.notifications import create_notification
+        await create_notification(
+            user_id=req.user_id,
+            title="Campaign Completed",
+            message=f"Voice campaign '{req.name}' completed. {successful_calls} calls made.",
+            notif_type="success"
+        )
+    
+    # Fire and forget the background task
+    asyncio.create_task(_run_voice_campaign())
+    
+    return {
+        "status": "success",
+        "message": f"Voice campaign '{req.name}' launched! Calling {len(req.leads)} leads.",
+        "campaign_id": campaign_id,
+        "assistant_id": assistant_id,
+    }
+
+
+@router.post("/voice/webhook")
+async def voice_webhook(request: Request):
+    """
+    Receives VAPI call-ended webhooks.
+    Updates the call log with transcript, recording, and processes via Groq.
+    """
+    from database import update_call_log
+    from services.vapi_service import process_call_transcript
+    from services.sms_sender import send_sms_via_twilio
+    import datetime
+    
+    try:
+        data = await request.json()
+        if not data:
+            return {"success": False, "error": "Empty body"}
+        
+        message_type = data.get("message", {}).get("type", "")
+        call = data.get("message", {}).get("call", data)
+        call_id = call.get("id", "")
+        status = call.get("status", "")
+        
+        logger.info(f"Voice webhook received: type={message_type}, call_id={call_id}, status={status}")
+        
+        if status in ("ended", "fulfilled"):
+            transcript = call.get("transcript", "")
+            recording_url = call.get("recordingUrl", "")
+            duration = call.get("duration", 0)
+            
+            # Process transcript
+            analysis = {"summary": "", "checklist": [], "sms_message": "", "sentiment": "Neutral"}
+            if transcript:
+                analysis = await process_call_transcript(transcript)
+            
+            update_data = {
+                "status": status,
+                "transcript": transcript,
+                "recording_url": recording_url,
+                "duration": duration,
+                "summary": analysis.get("summary", ""),
+                "checklist": analysis.get("checklist", []),
+                "sentiment": analysis.get("sentiment", "Neutral"),
+                "ended_reason": call.get("endedReason", ""),
+                "updated_at": datetime.datetime.utcnow(),
+            }
+            
+            await update_call_log(call_id, update_data)
+            logger.info(f"Updated call log {call_id} via webhook")
+        
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Voice webhook error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/voice/calls")
+async def get_voice_calls(user_id: str, campaign_id: str = None):
+    """Get call logs for a user, optionally filtered by campaign."""
+    from database import get_call_logs
+    
+    logs = await get_call_logs(user_id, campaign_id)
+    return {"calls": logs}
+
+
+@router.get("/voice/stats")
+async def get_voice_stats(user_id: str):
+    """Get aggregated call statistics for the Calls dashboard."""
+    from database import get_call_stats
+    
+    stats = await get_call_stats(user_id)
+    return stats
+
+
+@router.post("/voice/draft")
+async def save_voice_draft(req: VoiceDraftRequest):
+    """Save a voice campaign as a draft without launching calls."""
+    from database import db
+    import datetime
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    new_draft = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Draft",
+        "type": "Voice",
+        "progress": 0,
+        "sent": 0,
+        "replied": 0,
+        "booked": 0,
+        "total_leads": len(req.leads),
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "prompt": req.prompt,
+        "first_message": req.first_message,
+        "leads": req.leads,
+        "action": "call",
+    }
+    
+    await db.campaigns.insert_one(new_draft)
+    return {"status": "success", "message": "Voice campaign saved as draft!"}
+
+async def _dispatch_whatsapp(user_id: str, leads: list, content: str, image_url: str = None, campaign_id: str = None) -> int:
+    from services.whatsapp import openwa_service
+    
+    successful_sends = 0
+    from services.billing import check_and_deduct_credits, TOKEN_COSTS
+    await check_and_deduct_credits(user_id, "WHATSAPP_SEND", amount=TOKEN_COSTS.get("WHATSAPP_SEND", 1), dry_run=True)
+    
+    for lead in leads:
+        lead_phone = lead.get("phone")
+        if not lead_phone:
+            continue
+            
+        # Evolution API requires phone numbers without the '+' sign and without spaces
+        sanitized_phone = str(lead_phone).replace("+", "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            
+        lead_name = lead.get("name", "there")
+        personalized_content = content.replace("[Name]", lead_name).replace("{Name}", lead_name)
+        session_id = f"user_{user_id}"
+        
+        try:
+            if image_url:
+                result = await openwa_service.send_image_message(phone_number=sanitized_phone, image_url=image_url, caption=personalized_content, session_id=session_id)
+            else:
+                result = await openwa_service.send_text_message(phone_number=sanitized_phone, message=personalized_content, session_id=session_id)
+                
+            successful_sends += 1
+            await check_and_deduct_credits(user_id, "WHATSAPP_SEND", amount=TOKEN_COSTS.get("WHATSAPP_SEND", 1), dry_run=False)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send WhatsApp message to {lead_phone}: {e}")
+            
+    return successful_sends
+
+@router.post("/whatsapp/publish")
+async def publish_whatsapp_campaign(req: SmsPublishRequest):
+    from database import db
+    import datetime
+    
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Publishing WhatsApp campaign '{req.name}' to {len(req.leads)} leads.")
+    
+    try:
+        successful_sends = await _dispatch_whatsapp(
+            user_id=req.user_id,
+            leads=req.leads,
+            content=req.content,
+            image_url=req.image_url
+        )
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    
+    new_campaign = {
+        "user_id": req.user_id,
+        "name": req.name,
+        "status": "Active",
+        "type": "WhatsApp",
+        "progress": 100,
+        "sent": successful_sends,
+        "replied": 0,
+        "booked": 0,
+        "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
+        "created_at": datetime.datetime.utcnow(),
+        "content": req.content,
+        "image_url": req.image_url,
+        "action": req.action,
+        "audience": [{"name": l.get("name", ""), "contact": l.get("phone", "")} for l in req.leads]
     }
     
     await db.campaigns.insert_one(new_campaign)
     
-    return {"status": "success", "message": f"Successfully published and sent email campaign to {successful_sends} contacts!"}
+    from services.notifications import create_notification
+    await create_notification(
+        user_id=req.user_id,
+        title="WhatsApp Campaign Completed",
+        message=f"WhatsApp campaign '{req.name}' successfully sent to {successful_sends} contacts.",
+        notif_type="success"
+    )
+    
+    return {"status": "success", "message": f"Successfully published and sent WhatsApp campaign to {successful_sends} contacts!"}

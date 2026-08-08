@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { apiFetch } from '../utils/api';
 
 export interface User {
@@ -8,6 +9,7 @@ export interface User {
   company: string;
   role: string;
   auth_provider: string;
+  token_balance?: number;
 }
 
 interface AuthContextType {
@@ -19,6 +21,8 @@ interface AuthContextType {
   googleLogin: (credential: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+  checkSession: () => Promise<void>;
+  updateUser: (data: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,17 +33,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const clearError = () => setError(null);
+  const updateUser = (data: Partial<User>) => setUser(prev => prev ? { ...prev, ...data } : null);
 
   // Verify authentication session on load
   const checkSession = async () => {
     try {
-      setLoading(true);
+      if (!user) setLoading(true);
       const userData = await apiFetch('/api/v1/auth/me');
       setUser(userData);
     } catch (err: any) {
       setUser(null);
     } finally {
-      setLoading(false);
+      if (!user) setLoading(false);
     }
   };
 
@@ -133,6 +138,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         googleLogin,
         logout,
         clearError,
+        checkSession,
+        updateUser,
       }}
     >
       {children}

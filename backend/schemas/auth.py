@@ -45,6 +45,9 @@ class UserResponse(BaseModel):
     role: str = Field(..., description="User role ('user' or 'admin')")
     auth_provider: str = Field(..., description="Authentication provider ('local' or 'google')")
     integrations: Optional[dict] = Field(default={}, description="Connected integrations for this user")
+    token_balance: Optional[float] = Field(default=0, description="Available token balance")
+    trial_ends_at: Optional[str] = Field(default=None, description="ISO timestamp of when the free trial ends")
+    trial_active: Optional[bool] = Field(default=False, description="Whether the free trial is currently active")
 
 
 class TokenResponse(BaseModel):

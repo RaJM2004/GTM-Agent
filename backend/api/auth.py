@@ -8,6 +8,10 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Response, Request, HTTPException, status, Depends
 from typing import List
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
 
 from schemas.auth import (
     UserRegister,
@@ -42,7 +46,10 @@ def format_user_doc(user: dict) -> dict:
         "company": user.get("company"),
         "role": user.get("role", "user"),
         "auth_provider": user.get("auth_provider", "local"),
-        "integrations": user.get("integrations", {})
+        "integrations": user.get("integrations", {}),
+        "token_balance": user.get("token_balance", 0),
+        "trial_ends_at": user.get("trial_ends_at").isoformat() if user.get("trial_ends_at") else None,
+        "trial_active": user.get("trial_active", False)
     }
 
 # Helpers to set cookie
@@ -106,6 +113,10 @@ async def register(user_data: UserRegister, response: Response):
         "company": user_data.company,
         "role": "user", # default role
         "auth_provider": "local",
+        "billing_plan": "Pro",
+        "token_balance": 100000.0,
+        "trial_ends_at": datetime.now(timezone.utc) + timedelta(days=14),
+        "trial_active": True,
         "created_at": datetime.now(timezone.utc)
     }
     
@@ -136,7 +147,8 @@ async def register(user_data: UserRegister, response: Response):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(credentials: UserLogin, response: Response):
+@limiter.limit("10/minute")
+async def login(credentials: UserLogin, response: Response, request: Request):
     """
     Log in an existing user.
     Verifies credentials and sets HTTP-only cookies.
@@ -221,6 +233,10 @@ async def google_login(google_req: GoogleLoginRequest, response: Response):
             "role": "user", # default role
             "auth_provider": "google",
             "google_sub": google_sub,
+            "billing_plan": "Pro",
+            "token_balance": 100000.0,
+            "trial_ends_at": datetime.now(timezone.utc) + timedelta(days=14),
+            "trial_active": True,
             "created_at": datetime.now(timezone.utc)
         }
         await db.users.insert_one(user)
@@ -250,11 +266,35 @@ async def google_login(google_req: GoogleLoginRequest, response: Response):
     
     return TokenResponse(
         success=True,
-        message="Google login successful",
+        message="Google Login successful",
         access_token=access_token,
         refresh_token=refresh_token,
         user=format_user_doc(user)
     )
+
+
+@router.get("/billing")
+async def get_billing_info(current_user: dict = Depends(get_current_user)):
+    """
+    Returns the billing plan, usage, limits, and reset date for the logged-in user.
+    """
+    from database import db
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database connection is not available"
+        )
+        
+    user = await db.users.find_one({"user_id": current_user["user_id"]})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    return {
+        "billing_plan": user.get("billing_plan", "Free"),
+        "token_balance": user.get("token_balance", 0),
+        "trial_ends_at": user.get("trial_ends_at"),
+        "trial_active": user.get("trial_active", False)
+    }
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -334,7 +374,8 @@ async def logout(response: Response):
 
 
 @router.post("/forgot-password")
-async def forgot_password(req: ForgotPasswordRequest):
+@limiter.limit("5/minute")
+async def forgot_password(req: ForgotPasswordRequest, request: Request):
     """
     Request a password reset link.
     Generates a token and logs the reset link for local development.
