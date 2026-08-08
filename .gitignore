@@ -9,4 +9,9 @@ dist/
 build/
 *.log
 *.png
+.node-persist/
+_IGNORE_session/
+*.postman_collection.json
+*.sw_col.json
+
 
