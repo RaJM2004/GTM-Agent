@@ -5,7 +5,7 @@
 ---
 
 ## 📋 Table of Contents
-
+,
 1. [Project Overview](#project-overview)
 2. [Tech Stack](#tech-stack)
 3. [Project Structure](#project-structure)
