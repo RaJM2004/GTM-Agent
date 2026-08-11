@@ -26,6 +26,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Zip backend application
+        run: zip -r release.zip . -x "antenv/*" -x "venv/*" -x "__pycache__/*" -x "*.pyc"
+        working-directory: ./backend
+
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
@@ -33,5 +37,4 @@ jobs:
           app-name: 'gtm-backend1'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E724D499FDA047D384397534B5323A33 }}
-          package: './backend'
-          type: 'zip'
+          package: './backend/release.zip'
