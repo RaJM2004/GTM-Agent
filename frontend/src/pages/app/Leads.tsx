@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Download, Plus, MoreHorizontal, UserCircle, Building2, Phone, Mail, FolderOpen, ChevronDown, ChevronRight, Loader2, Trash2, Users, Globe, ExternalLink, RefreshCw, Bot, Laptop, HeartPulse, Wallet, Cloud, GraduationCap, ShoppingCart, Building, Link as LinkIcon, Folder, Upload, MessageSquare, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Download, Plus, Building2, Phone, Mail, ChevronDown, ChevronRight, Loader2, Trash2, Users, Globe, ExternalLink, RefreshCw, Bot, Laptop, HeartPulse, Wallet, Cloud, GraduationCap, ShoppingCart, Building, Link as LinkIcon, Folder, MessageSquare, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 

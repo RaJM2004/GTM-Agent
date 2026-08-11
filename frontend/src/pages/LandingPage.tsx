@@ -17,7 +17,7 @@ export default function LandingPage() {
 
   useEffect(() => {
     const currentPhrase = placeholders[phraseIndex];
-    let timer: NodeJS.Timeout;
+    let timer: ReturnType<typeof setTimeout>;
     
     if (isDeleting) {
       if (placeholderText.length > 0) {

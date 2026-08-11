@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Check, ExternalLink } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Bell, Check } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000';
 

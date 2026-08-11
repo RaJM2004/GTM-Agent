@@ -28,8 +28,9 @@ export default function Integrations() {
 
   useEffect(() => {
     if (user && user.integrations) {
+      const userIntegrations = user.integrations;
       setIntegrations(prev => prev.map(int => {
-        if (user.integrations[int.id]) {
+        if (userIntegrations[int.id]) {
           return { ...int, status: 'connected' };
         }
         return int;

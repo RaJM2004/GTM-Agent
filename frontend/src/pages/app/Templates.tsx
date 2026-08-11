@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, FileText, Mail, MessageSquare, Search, Copy, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Mail, MessageSquare, Search, Copy, Edit2, Trash2 } from 'lucide-react';
 
 const templates = [
   { id: 1, name: 'Cold Outreach v1', channel: 'Email', uses: 1240, replyRate: '12.4%', lastEdited: '2 days ago' },

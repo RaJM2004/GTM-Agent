@@ -1,4 +1,4 @@
-import { CreditCard, CheckCircle2, FileText, Zap, Loader2, Coins, Clock } from 'lucide-react';
+import { CreditCard, CheckCircle2, Loader2, Coins, Clock } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';

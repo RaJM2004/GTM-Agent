@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Filter, Download, Plus, MoreHorizontal, UserCircle, Building2, Phone, Mail, FolderOpen, ChevronDown, ChevronRight, Loader2, Trash2, Users, Globe, ExternalLink, RefreshCw, Folder, Upload, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Search, Download, Building2, Phone, Mail, ChevronDown, ChevronRight, Loader2, Trash2, Globe, RefreshCw, Folder, Upload, X } from 'lucide-react';
 
 interface Contact {
   name: string;
@@ -24,13 +23,11 @@ interface ContactGroup {
 }
 
 export default function Contacts() {
-  const navigate = useNavigate();
   const [contactGroups, setContactGroups] = useState<ContactGroup[]>([]);
   const [totalContacts, setTotalContacts] = useState(0);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedLists, setExpandedLists] = useState<Set<string>>(new Set());
-  const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<string | null>(null);
   
   // Upload & Mapping State
@@ -269,8 +266,6 @@ export default function Contacts() {
         <div className="flex-1 space-y-4 overflow-y-auto pb-4">
           {filteredGroups.map((group) => {
             const isExpanded = expandedLists.has(group.list_name);
-            const allKeys = group.contacts.map((_l, i) => `${group.list_name}-${i}`);
-            const allSelected = allKeys.length > 0 && allKeys.every(k => selectedContacts.has(k));
 
             return (
               <div key={group.list_name} className="bg-white rounded-xl border border-[#F2DED6] overflow-hidden shadow-sm">

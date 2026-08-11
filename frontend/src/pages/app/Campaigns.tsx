@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MoreVertical, Play, Pause, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles, Trash2 } from 'lucide-react';
+import { Plus, MoreVertical, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 
@@ -17,7 +17,6 @@ export default function Campaigns() {
   const [productInfo, setProductInfo] = useState('');
   const [generatedContent, setGeneratedContent] = useState('');
   const [isGeneratingContent, setIsGeneratingContent] = useState(false);
-  const [needsImage, setNeedsImage] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -423,7 +422,7 @@ export default function Campaigns() {
   };
 
   // Voice: toggle all phones in industry
-  const toggleIndustryPhoneSelection = (industry: string, leads: any[]) => {
+  const toggleIndustryPhoneSelection = (_industry: string, leads: any[]) => {
     const phonesInGroup = (leads || []).filter((l: any) => l.phone).map((l: any) => l.phone);
     setSelectedLeadPhones(prev => {
       const next = new Set(prev);
@@ -1262,7 +1261,7 @@ export default function Campaigns() {
 
                           <button
                             onClick={handlePublish}
-                            disabled={isPublishing || isSavingDraft || (campaignType === 'email' && audienceMethod === 'leads' && selectedLeadEmails.size === 0) || (campaignType === 'email' && audienceMethod === 'upload' && !uploadFile)}
+                            disabled={isPublishing || isSavingDraft || (campaignType === 'email' && selectedLeadEmails.size === 0)}
                             className="w-2/3 bg-green-600 hover:bg-green-700 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
                           >
                             {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

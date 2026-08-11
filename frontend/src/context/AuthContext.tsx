@@ -10,6 +10,7 @@ export interface User {
   role: string;
   auth_provider: string;
   token_balance?: number;
+  integrations?: Record<string, any>;
 }
 
 interface AuthContextType {
