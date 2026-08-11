@@ -56,7 +56,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-app
-          path: backend
+          path: .
       
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
@@ -65,4 +65,5 @@ jobs:
           app-name: 'gtm-backend1'
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E724D499FDA047D384397534B5323A33 }}
-          package: 'backend'
+          package: '.'
+          type: zip
