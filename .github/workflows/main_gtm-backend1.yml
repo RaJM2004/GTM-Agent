@@ -34,3 +34,4 @@ jobs:
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E724D499FDA047D384397534B5323A33 }}
           package: './backend'
+          type: 'zip'
