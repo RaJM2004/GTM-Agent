@@ -112,7 +112,7 @@ async def google_login(user_id: str = "default_user"):
 
 @router.get("/google/callback")
 async def google_callback(
-    state: str,
+    state: str = None,
     code: str = None,
     error: str = None,
     error_description: str = None
