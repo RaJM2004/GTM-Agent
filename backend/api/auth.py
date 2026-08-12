@@ -54,6 +54,11 @@ def format_user_doc(user: dict) -> dict:
 
 # Helpers to set cookie
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
+    # In production/HTTPS, same_site must be 'none' and secure must be True for cross-origin cookies to work
+    is_prod = not settings.DEBUG
+    samesite_val = "none" if is_prod else "lax"
+    secure_val = True if is_prod else False
+
     # Set access token cookie (15 mins)
     response.set_cookie(
         key="access_token",
@@ -61,8 +66,8 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
         httponly=True,
         max_age=15 * 60,
         expires=15 * 60,
-        samesite="lax",
-        secure=False # Set to True in production with HTTPS
+        samesite=samesite_val,
+        secure=secure_val
     )
     # Set refresh token cookie (7 days)
     response.set_cookie(
@@ -71,8 +76,8 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
         httponly=True,
         max_age=7 * 24 * 60 * 60,
         expires=7 * 24 * 60 * 60,
-        samesite="lax",
-        secure=False
+        samesite=samesite_val,
+        secure=secure_val
     )
 
 # ── API Endpoints ─────────────────────────────────────────────────────────────
@@ -338,14 +343,18 @@ async def refresh(request: Request, response: Response):
         new_access_token = create_access_token(new_payload)
         
         # Set access token cookie
+        is_prod = not settings.DEBUG
+        samesite_val = "none" if is_prod else "lax"
+        secure_val = True if is_prod else False
+        
         response.set_cookie(
             key="access_token",
             value=new_access_token,
             httponly=True,
             max_age=15 * 60,
             expires=15 * 60,
-            samesite="lax",
-            secure=False
+            samesite=samesite_val,
+            secure=secure_val
         )
         
         return TokenResponse(
@@ -368,8 +377,12 @@ async def logout(response: Response):
     """
     Log out the user by deleting the access and refresh token cookies.
     """
-    response.delete_cookie("access_token")
-    response.delete_cookie("refresh_token")
+    is_prod = not settings.DEBUG
+    samesite_val = "none" if is_prod else "lax"
+    secure_val = True if is_prod else False
+    
+    response.delete_cookie("access_token", samesite=samesite_val, secure=secure_val)
+    response.delete_cookie("refresh_token", samesite=samesite_val, secure=secure_val)
     return {"success": True, "message": "Successfully logged out"}
 
 
