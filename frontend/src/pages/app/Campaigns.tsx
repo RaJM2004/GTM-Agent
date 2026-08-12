@@ -50,7 +50,7 @@ export default function Campaigns() {
   const fetchCampaigns = async () => {
     try {
       const userId = user?.user_id || 'user_12345_john_doe';
-      const data = await apiFetch(`/api/campaigns?user_id=${userId}`);
+      const data = await apiFetch(`/api/campaigns/?user_id=${userId}`);
       if (Array.isArray(data)) {
         const mappedData = data.map((c: any) => ({
           ...c,
