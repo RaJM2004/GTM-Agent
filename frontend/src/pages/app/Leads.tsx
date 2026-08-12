@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Search, Download, Plus, Building2, Phone, Mail, ChevronDown, ChevronRight, Loader2, Trash2, Users, Globe, ExternalLink, RefreshCw, Bot, Laptop, HeartPulse, Wallet, Cloud, GraduationCap, ShoppingCart, Building, Link as LinkIcon, Folder, MessageSquare, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { apiFetch } from '../../utils/api';
 
 interface Lead {
   id?: string;
@@ -81,12 +82,10 @@ export default function Leads() {
     setIsDeletingLeads(true);
     try {
       const currentUserId = user?.user_id || 'user_12345_john_doe';
-      const res = await fetch(`http://localhost:8000/api/leads/delete-batch`, {
+      const data = await apiFetch(`/api/leads/delete-batch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: currentUserId, lead_ids: ids })
+        bodyData: { user_id: currentUserId, lead_ids: ids }
       });
-      const data = await res.json();
       if (data.success) {
         setSelectedLeads(prev => {
           const next = new Set(prev);
@@ -109,8 +108,7 @@ export default function Leads() {
     setLoading(true);
     try {
       const currentUserId = user?.user_id || 'user_12345_john_doe';
-      const res = await fetch(`http://localhost:8000/api/leads?user_id=${currentUserId}`);
-      const data = await res.json();
+      const data = await apiFetch(`/api/leads?user_id=${currentUserId}`);
       if (data.success) {
         setIndustryGroups(data.industry_groups || []);
         setTotalLeads(data.total_leads || 0);
@@ -140,11 +138,13 @@ export default function Leads() {
   const handleExportCSV = async (industry?: string) => {
     try {
       const currentUserId = user?.user_id || 'user_12345_john_doe';
-      const url = industry 
-        ? `http://localhost:8000/api/leads/export?industry=${encodeURIComponent(industry)}&user_id=${currentUserId}`
-        : `http://localhost:8000/api/leads/export?user_id=${currentUserId}`;
-      const res = await fetch(url);
-      const blob = await res.blob();
+      const path = industry 
+        ? `/api/leads/export?industry=${encodeURIComponent(industry)}&user_id=${currentUserId}`
+        : `/api/leads/export?user_id=${currentUserId}`;
+      const resText = await apiFetch(path);
+      
+      // Since apiFetch returns text/blob or json, let's create a download link directly from string
+      const blob = new Blob([resText], { type: 'text/csv' });
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
@@ -164,8 +164,7 @@ export default function Leads() {
     setDeleting(industry);
     try {
       const currentUserId = user?.user_id || 'user_12345_john_doe';
-      const res = await fetch(`http://localhost:8000/api/leads/industry/${encodeURIComponent(industry)}?user_id=${currentUserId}`, { method: 'DELETE' });
-      const data = await res.json();
+      const data = await apiFetch(`/api/leads/industry/${encodeURIComponent(industry)}?user_id=${currentUserId}`, { method: 'DELETE' });
       if (data.success) {
         fetchLeads();
       }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Filter, Download, Plus, Bot, Sparkles, Loader2, Mail, Phone, ShieldCheck, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { apiFetch } from '../../utils/api';
 
 // Helper: extract requested count from prompt
 function extractCountFromPrompt(prompt: string): number {
@@ -52,26 +53,15 @@ export default function Discovery() {
     const requestedCount = extractCountFromPrompt(query);
     try {
       const currentUserId = user?.user_id || 'user_12345_john_doe';
-      const res = await fetch('http://localhost:8000/api/discovery/search', {
+      const data = await apiFetch('/api/discovery/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: query, max_results: requestedCount, user_id: currentUserId }),
+        bodyData: { prompt: query, max_results: requestedCount, user_id: currentUserId },
       });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        if (res.status === 402) {
-          if (window.confirm((errData.detail || errData.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
-            window.location.href = '/app/billing';
-          }
-        }
-        throw new Error(errData.detail || errData.message || 'Failed to fetch leads');
-      }
-      const data = await res.json();
       setLeads(data.leads || []);
       setSearched(true);
       checkSession();
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Failed to fetch leads');
     } finally {
       setLoading(false);
     }
@@ -81,13 +71,10 @@ export default function Discovery() {
     if (leads.length === 0) return;
     setScoring(true);
     try {
-      const res = await fetch('http://localhost:8000/api/discovery/score-icp', {
+      const data = await apiFetch('/api/discovery/score-icp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leads, original_query: query, user_id: user?.user_id }),
+        bodyData: { leads, original_query: query, user_id: user?.user_id },
       });
-      if (!res.ok) throw new Error('ICP scoring failed');
-      const data = await res.json();
       // Merge scores back into leads
       const scoredLeads = leads.map((lead, idx) => ({
         ...lead,

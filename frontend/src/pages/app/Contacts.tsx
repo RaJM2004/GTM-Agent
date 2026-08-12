@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, Download, Building2, Phone, Mail, ChevronDown, ChevronRight, Loader2, Trash2, Globe, RefreshCw, Folder, Upload, X } from 'lucide-react';
+import { apiFetch } from '../../utils/api';
 
 interface Contact {
   name: string;
@@ -43,8 +44,7 @@ export default function Contacts() {
   const fetchContacts = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/api/contacts');
-      const data = await res.json();
+      const data = await apiFetch('/api/contacts');
       if (data.success) {
         setContactGroups(data.contact_groups || []);
         setTotalContacts(data.total_contacts || 0);
@@ -60,11 +60,11 @@ export default function Contacts() {
 
   const handleExportCSV = async (listName?: string) => {
     try {
-      const url = listName 
-        ? `http://localhost:8000/api/contacts/export?list_name=${encodeURIComponent(listName)}`
-        : 'http://localhost:8000/api/contacts/export';
-      const res = await fetch(url);
-      const blob = await res.blob();
+      const path = listName 
+        ? `/api/contacts/export?list_name=${encodeURIComponent(listName)}`
+        : '/api/contacts/export';
+      const resText = await apiFetch(path);
+      const blob = new Blob([resText], { type: 'text/csv' });
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
@@ -96,12 +96,14 @@ export default function Contacts() {
     formData.append('file', file);
 
     try {
-      const res = await fetch('http://localhost:8000/api/contacts/analyze', {
+      // For multipart uploads, we let browser/fetch handle boundary header, but apiFetch must not JSON stringify
+      const data = await apiFetch('/api/contacts/analyze', {
         method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
+        headers: {}, // Empty headers lets browser set multipart boundary
+        body: formData // raw body
+      } as any);
+      
+      if (data.success) {
         setCsvHeaders(data.headers);
         
         // Auto-suggest mappings based on backend response or simple matching
@@ -129,9 +131,9 @@ export default function Contacts() {
       } else {
         alert(data.detail || 'Failed to analyze file.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Analysis failed:', err);
-      alert('An error occurred while analyzing the file.');
+      alert(err.message || 'An error occurred while analyzing the file.');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -147,12 +149,13 @@ export default function Contacts() {
     formData.append('mapping', JSON.stringify(columnMap));
 
     try {
-      const res = await fetch('http://localhost:8000/api/contacts/upload-mapped', {
+      const data = await apiFetch('/api/contacts/upload-mapped', {
         method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
+        headers: {},
+        body: formData
+      } as any);
+      
+      if (data.success) {
         alert(data.message);
         setShowMappingModal(false);
         setPendingFile(null);
@@ -160,9 +163,9 @@ export default function Contacts() {
       } else {
         alert(data.detail || 'Failed to import contacts.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Upload failed:', err);
-      alert('An error occurred while uploading.');
+      alert(err.message || 'An error occurred while uploading.');
     } finally {
       setUploading(false);
     }
@@ -172,10 +175,8 @@ export default function Contacts() {
     if (!confirm(`Delete all contacts in "${listName}"? This cannot be undone.`)) return;
     setDeleting(listName);
     try {
-      const res = await fetch(`http://localhost:8000/api/contacts/list/${encodeURIComponent(listName)}`, { method: 'DELETE' });
-      if (res.ok) {
-        fetchContacts();
-      }
+      await apiFetch(`/api/contacts/list/${encodeURIComponent(listName)}`, { method: 'DELETE' });
+      fetchContacts();
     } catch (err) {
       console.error('Delete failed:', err);
     } finally {
