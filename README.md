@@ -1,4 +1,4 @@
-.﻿# 🚀 Genquantaa GTM OS — AI-Powered Go-To-Market Platform
+..﻿# 🚀 Genquantaa GTM OS — AI-Powered Go-To-Market Platform
 
 > An AI-driven, multi-channel sales automation platform featuring lead discovery, voice calling (VAPI), WhatsApp messaging (Evolution API), email campaigns, and a Cashfree payment gateway.
 
