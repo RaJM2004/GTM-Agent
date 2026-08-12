@@ -11,7 +11,7 @@
 3. [Project Structure](#project-structure)
 4. [Prerequisites](#prerequisites)
 5. [Local Development Setup](#local-development-setup)
-6. [Environment Variables Reference](#environment-variables-reference)
+6. [Environment Variables Reference](#environment-variables-reference).
 7. [Production Deployment (Azure)](#production-deployment-azure)
 8. [API Endpoints Reference](#api-endpoints-reference)
 9. [Troubleshooting](#troubleshooting)
