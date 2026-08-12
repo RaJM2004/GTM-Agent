@@ -230,15 +230,6 @@ export default function Campaigns() {
         });
       });
 
-      const getBackendUrl = () => {
-        if (typeof window !== 'undefined') {
-          if (window.location.hostname.includes('azurestaticapps.net') || window.location.hostname.includes('green-dune')) {
-            return 'https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net';
-          }
-        }
-        return import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      };
-
       let path = '/api/campaigns/email/send';
       let payload: any = {
         campaign_id: viewingCampaign.id,

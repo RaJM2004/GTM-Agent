@@ -108,7 +108,7 @@ export default function Integrations() {
   const submitEmailConnect = async () => {
     setIsConnecting(true);
     try {
-      const data = await apiFetch('/api/integrations/email/connect', {
+      await apiFetch('/api/integrations/email/connect', {
         method: 'POST',
         bodyData: {
           provider: showEmailModal,

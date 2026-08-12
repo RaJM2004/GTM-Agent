@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PhoneCall, Play, Mic, Clock, Users, ChevronDown, ChevronUp, FileText, MessageCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { apiFetch } from '../../utils/api';
 
 interface CallLog {
   id: string;
