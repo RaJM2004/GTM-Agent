@@ -24,8 +24,12 @@ FRONTEND_URL = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
 # LinkedIn OAuth URLs
 AUTHORIZATION_URL = "https://www.linkedin.com/oauth/v2/authorization"
 ACCESS_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
-# Note: In production, redirect_uri must match exactly what's configured in LinkedIn Dev Portal
-REDIRECT_URI = "http://localhost:8000/api/integrations/linkedin/callback"
+
+# Dynamically set redirect URIs based on debug mode
+IS_PROD = not settings.DEBUG
+BACKEND_BASE = "https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net" if IS_PROD else "http://localhost:8000"
+
+REDIRECT_URI = f"{BACKEND_BASE}/api/integrations/linkedin/callback"
 
 @router.get("/linkedin/login")
 async def linkedin_login(user_id: str = "default_user"):
@@ -97,9 +101,10 @@ async def linkedin_callback(
 @router.get("/google/login")
 async def google_login(user_id: str = "default_user"):
     """Returns the Google authorization URL to redirect the user to."""
+    google_redirect_uri = f"{BACKEND_BASE}/api/integrations/google/callback"
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
-        "redirect_uri": "http://localhost:8000/api/integrations/google/callback",
+        "redirect_uri": google_redirect_uri,
         "response_type": "code",
         "scope": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send openid profile email",
         "access_type": "offline",
@@ -125,6 +130,7 @@ async def google_callback(
     if not code:
         raise HTTPException(status_code=400, detail="Authorization code missing")
         
+    google_redirect_uri = f"{BACKEND_BASE}/api/integrations/google/callback"
     # Exchange code for access & refresh tokens
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -134,7 +140,7 @@ async def google_callback(
                 "client_secret": settings.GOOGLE_CLIENT_SECRET,
                 "code": code,
                 "grant_type": "authorization_code",
-                "redirect_uri": "http://localhost:8000/api/integrations/google/callback"
+                "redirect_uri": google_redirect_uri
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
