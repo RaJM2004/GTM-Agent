@@ -11,6 +11,7 @@ aiohttp==3.10.10
 fake-useragent==1.5.1
 phonenumbers==8.13.47
 ddgs
+huggingface_hub
 python-multipart
 motor
 bcrypt==4.2.0
