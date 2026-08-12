@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for Evolution API
+  evolution_db:
+    image: postgres:16-alpine
+    container_name: gtm_evolution_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: gtm_secure_password_123
+      POSTGRES_DB: evolution_api
+    ports:
+      - "5432:5432"
+    volumes:
+      - evolution_db_data:/var/lib/postgresql/data
+      - ./call_agent_os_dump.sql:/docker-entrypoint-initdb.d/call_agent_os_dump.sql
+
+  # Evolution API (WhatsApp)
+  evolution_api:
+    image: evoapicloud/evolution-api:v1.8.2
+    container_name: gtm_evolution_api
+    restart: always
+    ports:
+      - "8082:8080"
+    environment:
+      - AUTHENTICATION_TYPE=apikey
+      - AUTHENTICATION_API_KEY=gtm_super_secret_global_key
+      - AUTHENTICATION_EXPOSE_IN_ENV=true
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://postgres:gtm_secure_password_123@evolution_db:5432/evolution_api?sslmode=disable
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
+      - DATABASE_SAVE_MESSAGE_CONNCTION=true
+    depends_on:
+      - evolution_db
+
+  # Reacher (Email Verification)
+  reacher:
+    image: reacherhq/check-if-email-exists:latest
+    container_name: gtm_reacher
+    restart: always
+    ports:
+      - "8080:8080"
+
+volumes:
+  evolution_db_data:
+    driver: local
