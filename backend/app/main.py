@@ -64,7 +64,13 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
+    allow_origins=[
+        "http://localhost:5173", 
+        "http://127.0.0.1:5173", 
+        "http://localhost:5174", 
+        "http://127.0.0.1:5174",
+        "https://green-dune-0f170e510.7.azurestaticapps.net"
+    ],
     allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
