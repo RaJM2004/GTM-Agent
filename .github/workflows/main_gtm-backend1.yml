@@ -18,11 +18,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy prod requirements as requirements.txt for Oryx
+      - name: Prepare production requirements
         working-directory: ./backend
         run: cp requirements.prod.txt requirements.txt
 
-      - name: Create deployment zip (source code only, NO venv)
+      - name: Create deployment package
         working-directory: ./backend
         run: |
           zip -r ../release.zip . \
@@ -44,7 +44,7 @@ jobs:
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'gtm-backend1'
-          slot-name: 'Production'
+          app-name: gtm-backend1
+          slot-name: Production
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_E724D499FDA047D384397534B5323A33 }}
-          package: './release.zip'
+          package: ./release.zip
