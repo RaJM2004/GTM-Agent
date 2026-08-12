@@ -68,12 +68,10 @@ export default function Calls() {
   const fetchCallData = async () => {
     setIsLoading(true);
     try {
-      const [callsRes, statsRes] = await Promise.all([
-        fetch(`http://localhost:8000/api/campaigns/voice/calls?user_id=${userId}`),
-        fetch(`http://localhost:8000/api/campaigns/voice/stats?user_id=${userId}`),
+      const [callsData, statsData] = await Promise.all([
+        apiFetch(`/api/campaigns/voice/calls?user_id=${userId}`),
+        apiFetch(`/api/campaigns/voice/stats?user_id=${userId}`),
       ]);
-      const callsData = await callsRes.json();
-      const statsData = await statsRes.json();
 
       setCalls(callsData.calls || []);
       setStats(statsData);

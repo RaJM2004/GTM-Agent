@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Plus, MoreVertical, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { apiFetch } from '../../utils/api';
 
 
 export default function Campaigns() {
@@ -49,8 +50,7 @@ export default function Campaigns() {
   const fetchCampaigns = async () => {
     try {
       const userId = user?.user_id || 'user_12345_john_doe';
-      const res = await fetch(`http://localhost:8000/api/campaigns?user_id=${userId}`);
-      const data = await res.json();
+      const data = await apiFetch(`/api/campaigns?user_id=${userId}`);
       if (Array.isArray(data)) {
         const mappedData = data.map((c: any) => ({
           ...c,
@@ -66,17 +66,13 @@ export default function Campaigns() {
   const deleteCampaign = async (campaignId: string) => {
     if (!confirm('Are you sure you want to delete this campaign?')) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/campaigns/${campaignId}`, {
+      await apiFetch(`/api/campaigns/${campaignId}`, {
         method: 'DELETE'
       });
-      if (res.ok) {
-        fetchCampaigns();
-      } else {
-        alert('Failed to delete campaign');
-      }
-    } catch (err) {
+      fetchCampaigns();
+    } catch (err: any) {
       console.error(err);
-      alert('Error deleting campaign');
+      alert(err.message || 'Error deleting campaign');
     }
   };
 
@@ -108,8 +104,7 @@ export default function Campaigns() {
 
   const fetchSmsLogs = async (campaignId: string) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/campaigns/sms/logs?campaign_id=${campaignId}`);
-      const data = await res.json();
+      const data = await apiFetch(`/api/campaigns/sms/logs?campaign_id=${campaignId}`);
       if (data.status === 'success') {
         setSmsLogs(data.logs);
       }
@@ -129,13 +124,10 @@ export default function Campaigns() {
       const currentUserId = user?.user_id || 'user_12345_john_doe';
 
       // Fetch both leads and imported contacts in parallel
-      const [leadsRes, contactsRes] = await Promise.all([
-        fetch(`http://localhost:8000/api/leads?user_id=${currentUserId}`),
-        fetch(`http://localhost:8000/api/contacts`)
+      const [leadsData, contactsData] = await Promise.all([
+        apiFetch(`/api/leads?user_id=${currentUserId}`),
+        apiFetch(`/api/contacts`)
       ]);
-
-      const leadsData = await leadsRes.json();
-      const contactsData = await contactsRes.json();
 
       let allGroups: any[] = [];
 
@@ -238,7 +230,16 @@ export default function Campaigns() {
         });
       });
 
-      let endpoint = 'http://localhost:8000/api/campaigns/email/send';
+      const getBackendUrl = () => {
+        if (typeof window !== 'undefined') {
+          if (window.location.hostname.includes('azurestaticapps.net') || window.location.hostname.includes('green-dune')) {
+            return 'https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net';
+          }
+        }
+        return import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      };
+
+      let path = '/api/campaigns/email/send';
       let payload: any = {
         campaign_id: viewingCampaign.id,
         user_id: user?.user_id || "user_12345_john_doe",
@@ -249,7 +250,7 @@ export default function Campaigns() {
       };
 
       if (isSms) {
-        endpoint = 'http://localhost:8000/api/campaigns/sms/publish';
+        path = '/api/campaigns/sms/publish';
         payload = {
           action: 'post',
           content: viewingCampaign.content || "SMS Content",
@@ -260,7 +261,7 @@ export default function Campaigns() {
           leads: collectedLeads.map(l => ({ name: l.name, phone: l.phone }))
         };
       } else if (isVoice) {
-        endpoint = 'http://localhost:8000/api/campaigns/voice/publish';
+        path = '/api/campaigns/voice/publish';
         payload = {
           user_id: user?.user_id || "user_12345_john_doe",
           name: viewingCampaign.name || 'Voice Campaign',
@@ -271,23 +272,10 @@ export default function Campaigns() {
         };
       }
 
-      const res = await fetch(endpoint, {
+      const data = await apiFetch(path, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        bodyData: payload
       });
-      const data = await res.json();
-      if (!res.ok) {
-        if (res.status === 402) {
-          if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
-            window.location.href = '/app/billing';
-          }
-        } else {
-          alert("Error: " + (data.detail || data.message || "Failed to send campaign"));
-        }
-        setIsSendingEmail(false);
-        return;
-      }
 
       if (data.status === 'error') {
         if (data.message && data.message.includes('Twilio')) {
@@ -307,9 +295,9 @@ export default function Campaigns() {
       setSelectedLeadEmails(new Set());
       setSelectedLeadPhones(new Set());
       fetchCampaigns();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Failed to send campaign');
+      alert(err.message || 'Failed to send campaign');
     }
     setIsSendingEmail(false);
   };
@@ -317,10 +305,9 @@ export default function Campaigns() {
   const handleGenerateContent = async () => {
     setIsGeneratingContent(true);
     try {
-      const res = await fetch('http://localhost:8000/api/campaigns/generate-content', {
+      const data = await apiFetch('/api/campaigns/generate-content', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        bodyData: {
           channel: campaignType,
           objective: objective,
           action: action,
@@ -328,9 +315,8 @@ export default function Campaigns() {
           target_customer: targetCustomer,
           call_to_action: callToAction,
           product_info: productInfo
-        })
+        }
       });
-      const data = await res.json();
       setGeneratedContent(data.content);
       setTimeout(() => {
         if (modalRef.current) {
@@ -352,13 +338,22 @@ export default function Campaigns() {
     const formData = new FormData();
     formData.append('file', file);
 
+    const getBackendUrl = () => {
+      if (typeof window !== 'undefined') {
+        if (window.location.hostname.includes('azurestaticapps.net') || window.location.hostname.includes('green-dune')) {
+          return 'https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net';
+        }
+      }
+      return import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    };
+
     try {
-      const res = await fetch('http://localhost:8000/api/campaigns/linkedin/upload-image', {
+      const data = await apiFetch('/api/campaigns/linkedin/upload-image', {
         method: 'POST',
-        body: formData,
-      });
-      const data = await res.json();
-      setImageUrl('http://localhost:8000' + data.image_url);
+        headers: {},
+        body: formData
+      } as any);
+      setImageUrl(getBackendUrl() + data.image_url);
     } catch (err) {
       console.error(err);
       alert('Failed to upload image');
@@ -368,14 +363,20 @@ export default function Campaigns() {
 
   const handleGenerateImage = async () => {
     setIsGeneratingImage(true);
+    const getBackendUrl = () => {
+      if (typeof window !== 'undefined') {
+        if (window.location.hostname.includes('azurestaticapps.net') || window.location.hostname.includes('green-dune')) {
+          return 'https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net';
+        }
+      }
+      return import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    };
     try {
-      const res = await fetch('http://localhost:8000/api/campaigns/linkedin/generate-image', {
+      const data = await apiFetch('/api/campaigns/linkedin/generate-image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: generatedContent })
+        bodyData: { content: generatedContent }
       });
-      const data = await res.json();
-      setImageUrl('http://localhost:8000' + data.image_url);
+      setImageUrl(getBackendUrl() + data.image_url);
     } catch (err) {
       console.error(err);
       alert('Failed to generate image');
@@ -387,18 +388,16 @@ export default function Campaigns() {
   const handleRefineVoicePrompt = async () => {
     setIsRefiningPrompt(true);
     try {
-      const res = await fetch('http://localhost:8000/api/campaigns/voice/refine-prompt', {
+      const data = await apiFetch('/api/campaigns/voice/refine-prompt', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        bodyData: {
           user_id: user?.user_id || 'user_12345_john_doe',
           raw_prompt: voiceRawPrompt,
           product_name: productName,
           target_customer: targetCustomer,
           call_to_action: callToAction,
-        })
+        }
       });
-      const data = await res.json();
       if (data.status === 'success') {
         setVoiceRefinedPrompt(data.refined_prompt);
       } else {
@@ -450,30 +449,17 @@ export default function Campaigns() {
           });
         });
 
-        const res = await fetch('http://localhost:8000/api/campaigns/voice/publish', {
+        const data = await apiFetch('/api/campaigns/voice/publish', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          bodyData: {
             user_id: user?.user_id || 'user_12345_john_doe',
             name: campaignName || productName || 'Voice Campaign',
             prompt: voiceRefinedPrompt || voiceRawPrompt,
             first_message: voiceFirstMessage,
             leads: collectedLeads,
             send_followup_sms: sendFollowupSms,
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          if (res.status === 402) {
-            if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
-              window.location.href = '/app/billing';
-            }
-          } else {
-            alert("Error: " + (data.detail || data.message || "Failed to publish"));
           }
-          setIsPublishing(false);
-          return;
-        }
+        });
         alert(data.message);
       } else if (campaignType === 'sms' || campaignType === 'whatsapp') {
         let collectedLeads: any[] = [];
@@ -485,10 +471,9 @@ export default function Campaigns() {
           });
         });
 
-        const res = await fetch('http://localhost:8000/api/campaigns/sms/publish', {
+        const data = await apiFetch('/api/campaigns/sms/publish', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          bodyData: {
             action,
             content: generatedContent,
             image_url: imageUrl,
@@ -496,20 +481,8 @@ export default function Campaigns() {
             name: campaignName || productName || "SMS Campaign",
             method: "leads",
             leads: collectedLeads.map(l => ({ name: l.name, phone: l.phone }))
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          if (res.status === 402) {
-            if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
-              window.location.href = '/app/billing';
-            }
-          } else {
-            alert("Error: " + (data.detail || data.message || "Failed to publish"));
           }
-          setIsPublishing(false);
-          return;
-        }
+        });
         if (data.status === 'error') {
           if (data.message && data.message.includes('Twilio')) {
             if (window.confirm(data.message + "\n\nWould you like to go to the Integrations page to connect it now?")) {
@@ -534,10 +507,9 @@ export default function Campaigns() {
           });
         });
 
-        const res = await fetch('http://localhost:8000/api/campaigns/email/publish', {
+        const data = await apiFetch('/api/campaigns/email/publish', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          bodyData: {
             action,
             content: generatedContent,
             image_url: imageUrl,
@@ -545,20 +517,8 @@ export default function Campaigns() {
             name: campaignName || productName || "EMAIL Campaign",
             method: "leads",
             leads: collectedLeads.map(l => ({ name: l.name, email: l.email, phone: l.phone }))
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          if (res.status === 402) {
-            if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
-              window.location.href = '/app/billing';
-            }
-          } else {
-            alert("Error: " + (data.detail || data.message || "Failed to publish"));
           }
-          setIsPublishing(false);
-          return;
-        }
+        });
         if (data.status === 'error') {
           alert("Error: " + data.message);
           setIsPublishing(false);
@@ -567,29 +527,16 @@ export default function Campaigns() {
           alert(data.message);
         }
       } else {
-        const res = await fetch('http://localhost:8000/api/campaigns/linkedin/publish', {
+        const data = await apiFetch('/api/campaigns/linkedin/publish', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          bodyData: {
             action,
             content: generatedContent,
             image_url: imageUrl,
             user_id: user?.user_id || "user_12345_john_doe",
             name: campaignName || productName || "LinkedIn Campaign"
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          if (res.status === 402) {
-            if (window.confirm((data.detail || data.message) + "\n\nClick OK to go to the Billing page to recharge your tokens.")) {
-              window.location.href = '/app/billing';
-            }
-          } else {
-            alert("Error: " + (data.detail || data.message || "Failed to publish"));
           }
-          setIsPublishing(false);
-          return;
-        }
+        });
         alert(data.message);
       }
 
@@ -608,9 +555,9 @@ export default function Campaigns() {
       setVoiceFirstMessage('Hello! Thanks for taking my call.');
       setSelectedLeadPhones(new Set());
       fetchCampaigns();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Failed to publish campaign');
+      alert(err.message || 'Failed to publish campaign');
     }
     setIsPublishing(false);
   };
@@ -619,32 +566,28 @@ export default function Campaigns() {
     setIsSavingDraft(true);
     try {
       if (campaignType === 'voice') {
-        const res = await fetch('http://localhost:8000/api/campaigns/voice/draft', {
+        const data = await apiFetch('/api/campaigns/voice/draft', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          bodyData: {
             user_id: user?.user_id || 'user_12345_john_doe',
             name: campaignName || productName || 'Untitled Voice Campaign',
             prompt: voiceRefinedPrompt || voiceRawPrompt,
             first_message: voiceFirstMessage,
             leads: [],
-          })
+          }
         });
-        const data = await res.json();
         alert(data.message);
       } else {
-        const res = await fetch('http://localhost:8000/api/campaigns/linkedin/draft', {
+        const data = await apiFetch('/api/campaigns/linkedin/draft', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          bodyData: {
             action,
             content: generatedContent,
             image_url: imageUrl,
             user_id: user?.user_id || "user_12345_john_doe",
             name: campaignName || productName || "Untitled Campaign"
-          })
+          }
         });
-        const data = await res.json();
         alert(data.message);
       }
       setShowCreateModal(false);

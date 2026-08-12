@@ -57,8 +57,7 @@ export default function Integrations() {
         const currentUserId = user?.user_id || "user_12345_john_doe";
         
         // Pass the user_id to the backend so it can be passed through the OAuth state
-        const res = await fetch(`http://localhost:8000/api/integrations/linkedin/login?user_id=${currentUserId}`);
-        const data = await res.json();
+        const data = await apiFetch(`/api/integrations/linkedin/login?user_id=${currentUserId}`);
         if (data.auth_url) {
           window.location.href = data.auth_url; // Redirect to LinkedIn OAuth
         }
@@ -72,8 +71,7 @@ export default function Integrations() {
     if (id === 'gmail') {
       try {
         const currentUserId = user?.user_id || "user_12345_john_doe";
-        const res = await fetch(`http://localhost:8000/api/integrations/google/login?user_id=${currentUserId}`);
-        const data = await res.json();
+        const data = await apiFetch(`/api/integrations/google/login?user_id=${currentUserId}`);
         if (data.auth_url) {
           window.location.href = data.auth_url; // Redirect directly to Google Workspace login
         }
@@ -110,27 +108,21 @@ export default function Integrations() {
   const submitEmailConnect = async () => {
     setIsConnecting(true);
     try {
-      const res = await fetch('http://localhost:8000/api/integrations/email/connect', {
+      const data = await apiFetch('/api/integrations/email/connect', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        bodyData: {
           provider: showEmailModal,
           user_id: user?.user_id || 'user_12345_john_doe',
           ...emailForm
-        })
+        }
       });
-      const data = await res.json();
-      if (res.ok) {
-        setIntegrations(integrations.map(int => int.id === showEmailModal ? { ...int, status: 'connected' } : int));
-        setShowEmailModal(null);
-        setEmailForm({ host: '', port: '', email: '', password: '' });
-        alert(`Successfully connected! You can now send Email Campaigns directly from the platform.`);
-      } else {
-        alert(data.detail || 'Failed to connect');
-      }
-    } catch (err) {
+      setIntegrations(integrations.map(int => int.id === showEmailModal ? { ...int, status: 'connected' } : int));
+      setShowEmailModal(null);
+      setEmailForm({ host: '', port: '', email: '', password: '' });
+      alert(`Successfully connected! You can now send Email Campaigns directly from the platform.`);
+    } catch (err: any) {
       console.error(err);
-      alert('Network error connecting email provider');
+      alert(err.message || 'Failed to connect email provider');
     }
     setIsConnecting(false);
   };
@@ -138,26 +130,24 @@ export default function Integrations() {
   const submitTwilioConnect = async () => {
     setIsConnecting(true);
     try {
-      const res = await fetch('http://localhost:8000/api/integrations/twilio/connect', {
+      const data = await apiFetch('/api/integrations/twilio/connect', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        bodyData: {
           user_id: user?.user_id || 'user_12345_john_doe',
           ...twilioForm
-        })
+        }
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (data.success) {
         setIntegrations(integrations.map(int => int.id === 'twilio' ? { ...int, status: 'connected' } : int));
         setShowTwilioModal(false);
         setTwilioForm({ account_sid: '', auth_token: '', from_number: '' });
         alert(`Successfully connected Twilio! You can now send SMS Campaigns.`);
       } else {
-        alert(data.detail || 'Failed to connect');
+        alert(data.message || 'Failed to connect');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Network error connecting Twilio');
+      alert(err.message || 'Network error connecting Twilio');
     }
     setIsConnecting(false);
   };
@@ -449,24 +439,23 @@ export default function Integrations() {
                   onClick={async () => {
                     setIsDisconnecting(true);
                     try {
-                      const res = await fetch(`http://localhost:8000/api/integrations/disconnect`, {
+                      const data = await apiFetch('/api/integrations/disconnect', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
+                        bodyData: { 
                           provider: showConfigModal,
                           user_id: user?.user_id || 'user_12345_john_doe'
-                        })
+                        }
                       });
-                      if (res.ok) {
+                      if (data.success) {
                         setIntegrations(integrations.map(int => int.id === showConfigModal ? { ...int, status: 'available' } : int));
                         setShowConfigModal(null);
                         alert(`Successfully disconnected!`);
                       } else {
-                        alert('Failed to disconnect');
+                        alert(data.message || 'Failed to disconnect');
                       }
-                    } catch (err) {
+                    } catch (err: any) {
                       console.error(err);
-                      alert('Network error');
+                      alert(err.message || 'Network error');
                     }
                     setIsDisconnecting(false);
                   }}
