@@ -18,25 +18,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python version
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Create virtual environment and install dependencies
+      - name: Copy prod requirements as requirements.txt for Oryx
         working-directory: ./backend
-        run: |
-          python -m venv antenv
-          source antenv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.prod.txt
+        run: cp requirements.prod.txt requirements.txt
 
-      - name: Create deployment zip (with venv included)
+      - name: Create deployment zip (source code only, NO venv)
         working-directory: ./backend
         run: |
           zip -r ../release.zip . \
             -x "*.pyc" \
             -x "__pycache__/*" \
+            -x "antenv/*" \
             -x "venv/*" \
             -x ".env" \
             -x "*.png" \
@@ -46,7 +38,8 @@ jobs:
             -x "check_phones.py" \
             -x "add_credits.py" \
             -x "update_ammar.py" \
-            -x "script.py"
+            -x "script.py" \
+            -x "startup.sh"
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
