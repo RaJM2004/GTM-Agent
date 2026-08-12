@@ -23,11 +23,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Install production dependencies
         working-directory: ./backend
         run: |
           python -m pip install --upgrade pip
-          pip install --target=".python_packages/lib/site-packages" -r requirements.txt
+          pip install -r requirements.prod.txt
 
       - name: Create deployment package
         working-directory: ./backend
@@ -36,7 +36,11 @@ jobs:
             -x "antenv/*" \
             -x "venv/*" \
             -x "__pycache__/*" \
-            -x "*.pyc"
+            -x "*.pyc" \
+            -x ".python_packages/*" \
+            -x "*.png" \
+            -x "*.jpg" \
+            -x "response.json"
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
