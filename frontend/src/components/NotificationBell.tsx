@@ -1,7 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import { Bell, Check } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const getBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname.includes('azurestaticapps.net') || window.location.hostname.includes('green-dune')) {
+      return 'https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net';
+    }
+  }
+  return import.meta.env.VITE_API_URL || 'http://localhost:8000';
+};
+
+const API_BASE = getBaseUrl();
 
 interface Notification {
   notification_id: string;

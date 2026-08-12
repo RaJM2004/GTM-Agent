@@ -1,4 +1,14 @@
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const getBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    // If we are running on the production Azure URL
+    if (window.location.hostname.includes('azurestaticapps.net') || window.location.hostname.includes('green-dune')) {
+      return 'https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net';
+    }
+  }
+  return import.meta.env.VITE_API_URL || 'http://localhost:8000';
+};
+
+const BASE_URL = getBaseUrl();
 
 interface RequestOptions extends RequestInit {
   bodyData?: any;
