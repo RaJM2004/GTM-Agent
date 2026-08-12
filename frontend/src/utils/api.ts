@@ -17,16 +17,24 @@ interface RequestOptions extends RequestInit {
 export async function apiFetch(path: string, options: RequestOptions = {}): Promise<any> {
   const url = path.startsWith('http') ? path : `${BASE_URL}${path}`;
   
-  // Ensure cookies are sent (for HttpOnly JWT tokens)
+  // Ensure cookies are sent
   options.credentials = options.credentials || 'include';
+  
+  // Prepare headers
+  const headers = { ...options.headers } as Record<string, string>;
+  
+  // Retrieve token from localStorage and set as Authorization header
+  const token = typeof window !== 'undefined' ? localStorage.getItem('gtm_access_token') : null;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   
   if (options.bodyData) {
     options.body = JSON.stringify(options.bodyData);
-    options.headers = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
+    headers['Content-Type'] = 'application/json';
   }
+  
+  options.headers = headers;
 
   let response = await fetch(url, options);
 
@@ -39,16 +47,35 @@ export async function apiFetch(path: string, options: RequestOptions = {}): Prom
     !path.includes('/auth/google')
   ) {
     try {
+      const refreshHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('gtm_refresh_token') : null;
+      if (refreshToken) {
+        refreshHeaders['Authorization'] = `Bearer ${refreshToken}`;
+      }
+      
       const refreshRes = await fetch(`${BASE_URL}/api/v1/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
+        headers: refreshHeaders
       });
 
       if (refreshRes.ok) {
-        // Retry original request
+        const refreshData = await refreshRes.json();
+        if (refreshData.access_token && typeof window !== 'undefined') {
+          localStorage.setItem('gtm_access_token', refreshData.access_token);
+        }
+        
+        // Retry original request with new token
+        const newHeaders = { ...options.headers } as Record<string, string>;
+        newHeaders['Authorization'] = `Bearer ${refreshData.access_token}`;
+        options.headers = newHeaders;
+        
         response = await fetch(url, options);
       } else {
-        // Dispath logout event so AuthContext can clean up state and redirect
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('gtm_access_token');
+          localStorage.removeItem('gtm_refresh_token');
+        }
         window.dispatchEvent(new CustomEvent('auth-failed'));
       }
     } catch (err) {
@@ -64,7 +91,19 @@ export async function apiFetch(path: string, options: RequestOptions = {}): Prom
   // Handle empty or text responses
   const contentType = response.headers.get('content-type');
   if (contentType && contentType.includes('application/json')) {
-    return response.json();
+    const data = await response.json();
+    
+    // Automatically capture tokens returned from auth endpoints
+    if (data && typeof window !== 'undefined') {
+      if (data.access_token) {
+        localStorage.setItem('gtm_access_token', data.access_token);
+      }
+      if (data.refresh_token) {
+        localStorage.setItem('gtm_refresh_token', data.refresh_token);
+      }
+    }
+    
+    return data;
   }
   return response.text();
 }

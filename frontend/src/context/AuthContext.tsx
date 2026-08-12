@@ -122,6 +122,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('Logout error on backend:', err);
     } finally {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('gtm_access_token');
+        localStorage.removeItem('gtm_refresh_token');
+      }
       setUser(null);
       setLoading(false);
       setError(null);
