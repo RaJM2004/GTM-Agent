@@ -55,9 +55,10 @@ export default function Integrations() {
     if (id === 'linkedin') {
       try {
         const currentUserId = user?.user_id || "user_12345_john_doe";
+        const frontendUrl = window.location.origin;
         
-        // Pass the user_id to the backend so it can be passed through the OAuth state
-        const data = await apiFetch(`/api/integrations/linkedin/login?user_id=${currentUserId}`);
+        // Pass the user_id and frontend_url to the backend so it can be passed through the OAuth state
+        const data = await apiFetch(`/api/integrations/linkedin/login?user_id=${currentUserId}&frontend_url=${encodeURIComponent(frontendUrl)}`);
         if (data.auth_url) {
           window.location.href = data.auth_url; // Redirect to LinkedIn OAuth
         }
@@ -71,7 +72,8 @@ export default function Integrations() {
     if (id === 'gmail') {
       try {
         const currentUserId = user?.user_id || "user_12345_john_doe";
-        const data = await apiFetch(`/api/integrations/google/login?user_id=${currentUserId}`);
+        const frontendUrl = window.location.origin;
+        const data = await apiFetch(`/api/integrations/google/login?user_id=${currentUserId}&frontend_url=${encodeURIComponent(frontendUrl)}`);
         if (data.auth_url) {
           window.location.href = data.auth_url; // Redirect directly to Google Workspace login
         }

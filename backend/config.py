@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     LINKEDIN_CLIENT_ID: str = os.getenv("LINKEDIN_CLIENT_ID", "YOUR_CLIENT_ID")
     LINKEDIN_CLIENT_SECRET: str = os.getenv("LINKEDIN_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    BACKEND_URL: str = os.getenv("BACKEND_URL", "")
     HF_TOKEN: str = os.getenv("HF_TOKEN", "")
 
     # VAPI Voice AI Config

@@ -25,21 +25,33 @@ FRONTEND_URL = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
 AUTHORIZATION_URL = "https://www.linkedin.com/oauth/v2/authorization"
 ACCESS_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 
-# Dynamically set redirect URIs based on debug mode
-IS_PROD = not settings.DEBUG
-BACKEND_BASE = "https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net" if IS_PROD else "http://localhost:8000"
-
-REDIRECT_URI = f"{BACKEND_BASE}/api/integrations/linkedin/callback"
+# Dynamically set redirect URIs based on settings or request headers
+def get_backend_base(request: Request = None) -> str:
+    if getattr(settings, "BACKEND_URL", None):
+        return settings.BACKEND_URL.rstrip("/")
+    if request:
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host", request.url.netloc)
+        if host:
+            return f"{proto}://{host}"
+        return str(request.base_url).rstrip("/")
+    IS_PROD = not settings.DEBUG
+    return "https://gtm-backend1-hmgygeahadebdyc7.canadacentral-01.azurewebsites.net" if IS_PROD else "http://localhost:8000"
 
 @router.get("/linkedin/login")
-async def linkedin_login(user_id: str = "default_user"):
+async def linkedin_login(request: Request, user_id: str = "default_user", frontend_url: str = None):
     """Returns the LinkedIn authorization URL to redirect the user to."""
+    backend_base = get_backend_base(request)
+    redirect_uri = f"{backend_base}/api/integrations/linkedin/callback"
+    state_val = user_id
+    if frontend_url:
+        state_val = f"{user_id}|{frontend_url}"
     # Scope for sharing on LinkedIn: w_member_social, r_liteprofile or r_basicprofile
     params = {
         "response_type": "code",
         "client_id": LINKEDIN_CLIENT_ID,
-        "redirect_uri": REDIRECT_URI,
-        "state": user_id,  # Pass the user_id through the OAuth flow!
+        "redirect_uri": redirect_uri,
+        "state": state_val,  # Pass the user_id through the OAuth flow!
         "scope": "openid profile email w_member_social"
     }
     url = f"{AUTHORIZATION_URL}?{urllib.parse.urlencode(params)}"
@@ -47,18 +59,29 @@ async def linkedin_login(user_id: str = "default_user"):
 
 @router.get("/linkedin/callback")
 async def linkedin_callback(
+    request: Request,
     state: str,
     code: str = None, 
     error: str = None, 
     error_description: str = None
 ):
     """Handles the OAuth callback from LinkedIn and exchanges the code for an access token."""
+    user_id = state
+    target_frontend_url = FRONTEND_URL
+    if state and "|" in state:
+        parts = state.split("|", 1)
+        user_id = parts[0]
+        target_frontend_url = parts[1]
+
     if error:
         logger.error(f"LinkedIn OAuth Error: {error} - {error_description}")
-        return RedirectResponse(f"{FRONTEND_URL}/app/integrations?error={error}")
+        return RedirectResponse(f"{target_frontend_url}/app/integrations?error={error}")
         
     if not code:
         raise HTTPException(status_code=400, detail="Authorization code missing")
+
+    backend_base = get_backend_base(request)
+    redirect_uri = f"{backend_base}/api/integrations/linkedin/callback"
 
     # Exchange code for access token
     async with httpx.AsyncClient() as client:
@@ -69,7 +92,7 @@ async def linkedin_callback(
                 "code": code,
                 "client_id": LINKEDIN_CLIENT_ID,
                 "client_secret": LINKEDIN_CLIENT_SECRET,
-                "redirect_uri": REDIRECT_URI,
+                "redirect_uri": redirect_uri,
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
@@ -77,12 +100,9 @@ async def linkedin_callback(
         if response.status_code != 200:
             logger.error(f"Failed to get LinkedIn access token: {response.text}")
             # Redirect back to frontend with error
-            return RedirectResponse(f"{FRONTEND_URL}/app/integrations?error=linkedin_auth_failed")
+            return RedirectResponse(f"{target_frontend_url}/app/integrations?error=linkedin_auth_failed")
             
         data = response.json()
-        
-        # The state variable contains our user_id!
-        user_id = state
         
         # Save the access token to the database attached to this specific user
         await save_integration_token(
@@ -95,13 +115,17 @@ async def linkedin_callback(
         )
         
         # Redirect back to the frontend with a success flag
-        return RedirectResponse(f"{FRONTEND_URL}/app/integrations?success=linkedin_connected")
+        return RedirectResponse(f"{target_frontend_url}/app/integrations?success=linkedin_connected")
 
 
 @router.get("/google/login")
-async def google_login(user_id: str = "default_user"):
+async def google_login(request: Request, user_id: str = "default_user", frontend_url: str = None):
     """Returns the Google authorization URL to redirect the user to."""
-    google_redirect_uri = f"{BACKEND_BASE}/api/integrations/google/callback"
+    backend_base = get_backend_base(request)
+    google_redirect_uri = f"{backend_base}/api/integrations/google/callback"
+    state_val = user_id
+    if frontend_url:
+        state_val = f"{user_id}|{frontend_url}"
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
         "redirect_uri": google_redirect_uri,
@@ -109,7 +133,7 @@ async def google_login(user_id: str = "default_user"):
         "scope": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send openid profile email",
         "access_type": "offline",
         "prompt": "consent",
-        "state": user_id
+        "state": state_val
     }
     url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
     return {"auth_url": url}
@@ -117,20 +141,29 @@ async def google_login(user_id: str = "default_user"):
 
 @router.get("/google/callback")
 async def google_callback(
+    request: Request,
     state: str = None,
     code: str = None,
     error: str = None,
     error_description: str = None
 ):
     """Handles the Google OAuth callback and exchanges the code for tokens."""
+    user_id = state
+    target_frontend_url = FRONTEND_URL
+    if state and "|" in state:
+        parts = state.split("|", 1)
+        user_id = parts[0]
+        target_frontend_url = parts[1]
+
     if error:
         logger.error(f"Google OAuth Error: {error} - {error_description}")
-        return RedirectResponse(f"{FRONTEND_URL}/app/integrations?error={error}")
+        return RedirectResponse(f"{target_frontend_url}/app/integrations?error={error}")
         
     if not code:
         raise HTTPException(status_code=400, detail="Authorization code missing")
         
-    google_redirect_uri = f"{BACKEND_BASE}/api/integrations/google/callback"
+    backend_base = get_backend_base(request)
+    google_redirect_uri = f"{backend_base}/api/integrations/google/callback"
     # Exchange code for access & refresh tokens
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -147,7 +180,7 @@ async def google_callback(
         
         if response.status_code != 200:
             logger.error(f"Failed to get Google tokens: {response.text}")
-            return RedirectResponse(f"{FRONTEND_URL}/app/integrations?error=google_auth_failed")
+            return RedirectResponse(f"{target_frontend_url}/app/integrations?error=google_auth_failed")
             
         data = response.json()
         access_token = data.get("access_token")
@@ -161,7 +194,7 @@ async def google_callback(
         )
         if profile_res.status_code != 200:
             logger.error(f"Failed to get Google user info: {profile_res.text}")
-            return RedirectResponse(f"{FRONTEND_URL}/app/integrations?error=google_profile_failed")
+            return RedirectResponse(f"{target_frontend_url}/app/integrations?error=google_profile_failed")
             
         profile = profile_res.json()
         email = profile.get("email")
@@ -172,7 +205,7 @@ async def google_callback(
         
         final_refresh_token = refresh_token
         if db is not None:
-            existing_user = await db.users.find_one({"user_id": state})
+            existing_user = await db.users.find_one({"user_id": user_id})
             if existing_user:
                 existing_creds = existing_user.get("integrations", {}).get("gmail", {})
                 if not final_refresh_token:
@@ -181,7 +214,7 @@ async def google_callback(
         expires_at = time.time() + expires_in
         
         await save_integration_token(
-            user_id=state,
+            user_id=user_id,
             platform="gmail",
             token_data={
                 "email": email,
@@ -192,7 +225,7 @@ async def google_callback(
             }
         )
         
-        return RedirectResponse(f"{FRONTEND_URL}/app/integrations?success=gmail_connected")
+        return RedirectResponse(f"{target_frontend_url}/app/integrations?success=gmail_connected")
 
 
 class EmailConnectRequest(BaseModel):
