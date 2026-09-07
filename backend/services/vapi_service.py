@@ -13,7 +13,7 @@ import logging
 import asyncio
 import json
 import httpx
-from groq import AsyncGroq
+from openai import AsyncOpenAI
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -64,11 +64,11 @@ async def refine_voice_prompt(
     Takes a user's rough prompt and refines it into a professional
     voice agent system prompt via Groq LLM.
     """
-    if not settings.GROQ_API_KEY:
-        logger.warning("GROQ_API_KEY not configured. Returning raw prompt.")
+    if not settings.OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY not configured. Returning raw prompt.")
         return raw_prompt
 
-    client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
     user_message = f"""Here is the user's raw description of what they want their AI voice agent to do:
 
@@ -85,7 +85,7 @@ Please convert this into a polished, professional system prompt for a voice AI a
 
     try:
         completion = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": VOICE_PROMPT_REFINER_SYSTEM},
                 {"role": "user", "content": user_message},
@@ -94,7 +94,7 @@ Please convert this into a polished, professional system prompt for a voice AI a
             max_tokens=2048,
         )
         refined = completion.choices[0].message.content.strip()
-        logger.info("Successfully refined voice prompt via Groq.")
+        logger.info("Successfully refined voice prompt via OpenAI.")
         return refined
     except Exception as e:
         logger.error(f"Failed to refine voice prompt: {e}")
@@ -133,8 +133,8 @@ async def create_or_update_assistant(
     payload = {
         "name": f"{assistant_name} ({user_id[:12]})",
         "model": {
-            "provider": "groq",
-            "model": "llama3-70b-8192",
+            "provider": "openai",
+            "model": "gpt-4o",
             "messages": [
                 {
                     "role": "system",
@@ -336,7 +336,7 @@ async def process_call_transcript(transcript: str) -> dict:
       - sms_message (follow-up SMS to send)
       - sentiment (Positive / Negative / Neutral)
     """
-    if not transcript or not settings.GROQ_API_KEY:
+    if not transcript or not settings.OPENAI_API_KEY:
         return {
             "summary": "",
             "checklist": [],
@@ -344,7 +344,7 @@ async def process_call_transcript(transcript: str) -> dict:
             "sentiment": "Neutral",
         }
 
-    client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
     prompt = f"""Analyze the following sales/consultation call transcript and provide:
 
@@ -376,7 +376,7 @@ Respond ONLY with a valid JSON object:
 
     try:
         completion = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
@@ -405,7 +405,7 @@ Respond ONLY with a valid JSON object:
             "sentiment": data.get("sentiment", "Neutral"),
         }
     except Exception as e:
-        logger.error(f"Failed to process transcript with Groq: {e}")
+        logger.error(f"Failed to process transcript with OpenAI: {e}")
         return {
             "summary": f"Transcript analysis failed: {str(e)[:100]}",
             "checklist": [

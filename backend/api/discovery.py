@@ -100,19 +100,19 @@ async def score_icp(request: ICPScoringRequest):
     """
     try:
         from config import settings
-        from groq import AsyncGroq
+        from openai import AsyncOpenAI
         from services.billing import check_and_deduct_credits, TOKEN_COSTS
         
         # Deduct credits for the enrichment processing (1 batch = 3 credits)
         if request.user_id:
             await check_and_deduct_credits(request.user_id, "WEB_ENRICHMENT", amount=TOKEN_COSTS["WEB_ENRICHMENT"], dry_run=False)
 
-        if not settings.GROQ_API_KEY:
+        if not settings.OPENAI_API_KEY:
             # Fallback: heuristic scoring without AI
             scores = [_heuristic_score(lead, request.original_query) for lead in request.leads]
             return ICPScoringResponse(scores=scores)
 
-        client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
         # Process in batches of 15 to stay within token limits
         all_scores: List[ICPScoreResult] = []
@@ -132,7 +132,7 @@ async def score_icp(request: ICPScoringRequest):
 
 
 async def _score_batch_with_ai(client, leads: List[LeadForScoring], original_query: str) -> List[ICPScoreResult]:
-    """Use Groq AI to score a batch of leads for ICP fitness."""
+    """Use OpenAI to score a batch of leads for ICP fitness."""
 
     leads_text = ""
     for idx, lead in enumerate(leads):
@@ -173,7 +173,7 @@ Return exactly {len(leads)} objects in the array, one per lead in order."""
 
     try:
         response = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": scoring_prompt}],
             temperature=0.0,
         )
@@ -276,7 +276,7 @@ async def discovery_health():
     return {
         "status": "healthy",
         "services": {
-            "groq_api": "configured" if settings.GROQ_API_KEY else "not_configured",
+            "openai_api": "configured" if settings.OPENAI_API_KEY else "not_configured",
             "search_engine": "duckduckgo (keyless)",
             "google_maps": "configured" if settings.GOOGLE_MAPS_API_KEY else "not_configured",
             "apollo": "configured" if settings.APOLLO_API_KEY else "not_configured",

@@ -1,6 +1,6 @@
 import os
 import logging
-from groq import AsyncGroq
+from openai import AsyncOpenAI
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -9,14 +9,14 @@ async def personalize_email_content(base_content: str, lead: dict, sender_name: 
     """
     Uses Groq LLM to completely personalize a generic email template using the lead's exact details.
     """
-    if not settings.GROQ_API_KEY:
+    if not settings.OPENAI_API_KEY:
         # Fallback to simple string replacement if no API key
         content = base_content
         content = content.replace("[Your Name]", sender_name)
         content = content.replace("Pharma Professional", lead.get("name", "there"))
         return content
 
-    client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     
     lead_info = f"""
     Name: {lead.get('name', 'Unknown')}
@@ -46,7 +46,7 @@ Instructions:
 
     try:
         completion = await client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=1024,
@@ -58,7 +58,7 @@ Instructions:
             
         return personalized_text
     except Exception as e:
-        logger.error(f"Failed to personalize email with Groq: {e}")
+        logger.error(f"Failed to personalize email with OpenAI: {e}")
         # Fallback to basic regex/string replace
         content = base_content.replace("[Your Name]", sender_name)
         return content

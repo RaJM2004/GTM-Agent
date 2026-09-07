@@ -2,7 +2,7 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 from pydantic import BaseModel
-from groq import AsyncGroq
+from openai import AsyncOpenAI
 
 from config import settings
 from services.image_gen import generate_campaign_image
@@ -102,15 +102,15 @@ class VoiceDraftRequest(BaseModel):
     first_message: str = "Hello! Thanks for taking my call."
     leads: list[dict] = []
 
-def get_groq_client():
-    if not settings.GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured")
-    return AsyncGroq(api_key=settings.GROQ_API_KEY)
+def get_openai_client():
+    if not settings.OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 @router.post("/generate-content", response_model=ContentResponse)
 async def generate_campaign_content(req: ContentRequest):
-    client = get_groq_client()
-    model = "llama-3.3-70b-versatile"
+    client = get_openai_client()
+    model = "gpt-4o-mini"
     
     from prompts.campaign_prompts import fill_prompt
     import json
@@ -164,8 +164,8 @@ async def generate_campaign_content(req: ContentRequest):
 
 @router.post("/linkedin/generate-image", response_model=ImageResponse)
 async def generate_linkedin_image(req: ImageRequest):
-    client = get_groq_client()
-    model = "llama-3.3-70b-versatile"
+    client = get_openai_client()
+    model = "gpt-4o-mini"
     import json
     from prompts.campaign_prompts import get_image_prompt
     

@@ -12,7 +12,7 @@ import logging
 import re
 from typing import Optional
 
-from groq import AsyncGroq
+from openai import AsyncOpenAI
 
 from config import settings
 from schemas.discovery import ParsedQuery
@@ -66,21 +66,21 @@ class PromptParser:
     """Parses natural language discovery prompts using Groq."""
 
     def __init__(self):
-        if settings.GROQ_API_KEY:
-            self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
-            self.model = "llama-3.3-70b-versatile"
+        if settings.OPENAI_API_KEY:
+            self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            self.model = "gpt-4o-mini"
         else:
             self.client = None
-            logger.warning("GROQ_API_KEY not set - using fallback regex parser")
+            logger.warning("OPENAI_API_KEY not set - using fallback regex parser")
 
     async def parse(self, prompt: str) -> ParsedQuery:
         """Parse a natural language prompt into structured search parameters."""
         if self.client:
-            return await self._parse_with_groq(prompt)
+            return await self._parse_with_openai(prompt)
         return self._parse_with_regex(prompt)
 
-    async def _parse_with_groq(self, prompt: str) -> ParsedQuery:
-        """Use Groq to parse the prompt."""
+    async def _parse_with_openai(self, prompt: str) -> ParsedQuery:
+        """Use OpenAI to parse the prompt."""
         try:
             formatted_prompt = PARSE_PROMPT.format(user_prompt=prompt)
             response = await self.client.chat.completions.create(
@@ -97,7 +97,7 @@ class PromptParser:
             data = json.loads(text)
             return ParsedQuery(**data)
         except Exception as e:
-            logger.error(f"Groq parsing failed: {e}, falling back to regex")
+            logger.error(f"OpenAI parsing failed: {e}, falling back to regex")
             return self._parse_with_regex(prompt)
 
     def _parse_with_regex(self, prompt: str) -> ParsedQuery:

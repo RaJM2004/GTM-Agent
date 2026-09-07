@@ -1,6 +1,6 @@
 import logging
 import json
-from groq import AsyncGroq
+from openai import AsyncOpenAI
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -9,12 +9,12 @@ async def classify_email_sentiment(email_body: str) -> str:
     """
     Classify an email reply as Positive, Negative, or Neutral using Llama 3 via Groq.
     """
-    if not settings.GROQ_API_KEY:
-        logger.warning("GROQ_API_KEY not configured. Skipping sentiment classification.")
+    if not settings.OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY not configured. Skipping sentiment classification.")
         return "Neutral"
         
-    client = AsyncGroq(api_key=settings.GROQ_API_KEY)
-    model = "llama-3.3-70b-versatile"
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    model = "gpt-4o-mini"
     
     prompt = f"""You are an expert sales assistant. Analyze the following email reply from a lead and classify their sentiment.
     
