@@ -299,6 +299,7 @@ export default function Campaigns() {
       const data = await apiFetch('/api/campaigns/generate-content', {
         method: 'POST',
         bodyData: {
+          user_id: user?.user_id,
           channel: campaignType,
           objective: objective,
           action: action,
@@ -365,7 +366,10 @@ export default function Campaigns() {
     try {
       const data = await apiFetch('/api/campaigns/linkedin/generate-image', {
         method: 'POST',
-        bodyData: { content: generatedContent }
+        bodyData: { 
+          user_id: user?.user_id,
+          content: generatedContent 
+        }
       });
       setImageUrl(getBackendUrl() + data.image_url);
     } catch (err) {
