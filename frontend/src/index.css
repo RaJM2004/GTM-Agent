@@ -105,3 +105,35 @@
   color: #a6accd;
   font-family: 'Courier New', Courier, monospace;
 }
+
+@keyframes shine {
+  0% { left: -100%; }
+  30% { left: 100%; }
+  100% { left: 100%; }
+}
+
+.animate-shine {
+  position: relative;
+  overflow: hidden;
+}
+
+.animate-shine::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.5), transparent);
+  transform: skewX(-20deg);
+  animation: shine 2s infinite;
+}
+
+@keyframes flowLine {
+  from { stroke-dashoffset: 16; }
+  to { stroke-dashoffset: 0; }
+}
+
+.animate-flow-line {
+  animation: flowLine 1s linear infinite;
+}
