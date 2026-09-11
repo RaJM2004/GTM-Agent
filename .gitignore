@@ -9,6 +9,7 @@ dist/
 build/
 *.log
 *.png
+!frontend/public/*.png
 .node-persist/
 _IGNORE_session/
 *.postman_collection.json
