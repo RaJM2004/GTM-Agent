@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { motion, AnimatePresence, useScroll, useTransform, useSpring, useInView } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useSpring, useInView } from 'framer-motion';
 import { 
   ArrowRight, Bot, Target, Zap, BarChart, Users, MessageSquare, PhoneCall, 
   Hourglass, CheckCircle2, Shield, Lock, Search, Globe, ChevronDown, Play,
-  Smartphone, Monitor, Plus, Minus, Mail, Database
+  Monitor, Plus, Mail, Database
 } from 'lucide-react';
 
 // ─── Animation Utilities ──────────────────────────────────────────────────────
@@ -20,27 +20,6 @@ const ScrollProgress = () => {
     />
   );
 };
-
-/** Fade-up reveal on viewport entry — wraps any section or element */
-const FadeUp = ({
-  children,
-  delay = 0,
-  className = '',
-}: {
-  children: React.ReactNode;
-  delay?: number;
-  className?: string;
-}) => (
-  <motion.div
-    initial={{ opacity: 0, y: 40 }}
-    whileInView={{ opacity: 1, y: 0 }}
-    viewport={{ once: true, margin: '-80px' }}
-    transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1], delay }}
-    className={className}
-  >
-    {children}
-  </motion.div>
-);
 
 /** Parent container that staggers child animations */
 const StaggerContainer = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
@@ -95,7 +74,6 @@ const CountUp = ({ to, suffix = '' }: { to: number; suffix?: string }) => {
 };
 
 // ─── Reusable Components ───────────────────────────────────────────────────────
-// Reusable Components
 const SectionHeading = ({ title, subtitle, badge }: { title: string, subtitle?: string, badge?: string }) => (
   <div className="text-center mb-16 max-w-3xl mx-auto px-4">
     {badge && (
@@ -108,120 +86,6 @@ const SectionHeading = ({ title, subtitle, badge }: { title: string, subtitle?: 
   </div>
 );
 
-const FaqItem = ({ question, answer, isOpen, onClick }: { question: string, answer: string, isOpen: boolean, onClick: () => void }) => (
-  <div className="border border-[#F2DED6] rounded-2xl bg-white overflow-hidden transition-all hover:border-primary/30">
-    <button
-      onClick={onClick}
-      className="w-full text-left px-6 py-5 flex items-center justify-between focus:outline-none"
-    >
-      <span className="font-bold text-[#3D322C] text-lg">{question}</span>
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${isOpen ? 'bg-primary text-white' : 'bg-[#FDF8F5] text-primary'}`}>
-        {isOpen ? <Minus className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-      </div>
-    </button>
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          <div className="px-6 pb-5 pt-0 text-gray-600 leading-relaxed border-t border-gray-50 mt-2">
-            {answer}
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  </div>
-);
-
-// Abstract UI Dashboard Mockup
-const DashboardMockup = () => (
-  <div className="w-full bg-white rounded-t-3xl rounded-b-xl border border-[#F2DED6] shadow-[0_20px_50px_-12px_rgba(221,138,115,0.2)] overflow-hidden">
-    {/* Browser Bar */}
-    <div className="h-12 border-b border-[#F2DED6] bg-[#FAF9F6] flex items-center px-4 gap-4">
-      <div className="flex gap-2">
-        <div className="w-3 h-3 rounded-full bg-red-400"></div>
-        <div className="w-3 h-3 rounded-full bg-amber-400"></div>
-        <div className="w-3 h-3 rounded-full bg-green-400"></div>
-      </div>
-      <div className="flex-1 max-w-xl mx-auto h-7 bg-white border border-[#F2DED6] rounded-md flex items-center px-3 text-xs text-gray-400">
-        <Lock className="w-3 h-3 mr-2" /> app.genquantaa.com
-      </div>
-    </div>
-
-    {/* App Body */}
-    <div className="flex h-[400px] md:h-[600px] bg-[#FAF9F6]">
-      {/* Sidebar */}
-      <div className="w-16 md:w-56 border-r border-[#F2DED6] bg-white p-4 flex flex-col gap-6">
-        <div className="hidden md:flex items-center gap-2 mb-4">
-          <Hourglass className="w-6 h-6 text-primary" />
-          <span className="font-bold">Genquantaa</span>
-        </div>
-        <div className="flex flex-col gap-2">
-          {['Dashboard', 'AI Discovery', 'Campaigns', 'Voice Agents', 'Analytics'].map((item, i) => (
-            <div key={i} className={`h-10 rounded-lg flex items-center px-3 gap-3 ${i === 1 ? 'bg-primary/10 text-primary font-medium' : 'text-gray-500 hover:bg-gray-50'}`}>
-              <div className={`w-5 h-5 rounded ${i === 1 ? 'bg-primary/20' : 'bg-gray-200'}`}></div>
-              <span className="hidden md:block text-sm">{item}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 p-4 md:p-8 overflow-hidden flex flex-col gap-6">
-        <div className="flex justify-between items-center">
-          <h3 className="font-bold text-xl">AI Discovery Engine</h3>
-          <div className="w-32 h-10 bg-primary text-white rounded-lg flex items-center justify-center text-sm font-medium shadow-sm">
-            + New Search
-          </div>
-        </div>
-
-        {/* AI Chat Input area */}
-        <div className="bg-white border border-[#F2DED6] rounded-2xl p-4 shadow-sm flex items-center gap-3">
-          <Bot className="text-primary w-6 h-6" />
-          <div className="flex-1 text-gray-800 text-sm font-medium">Find me SaaS Founders in California who recently raised Series A...</div>
-          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white">
-            <ArrowRight className="w-4 h-4" />
-          </div>
-        </div>
-
-        {/* Results Table Abstract */}
-        <div className="flex-1 bg-white border border-[#F2DED6] rounded-2xl shadow-sm overflow-hidden flex flex-col">
-          <div className="h-12 border-b border-gray-100 flex items-center px-6 gap-4 text-xs font-semibold text-gray-500 uppercase">
-            <div className="w-1/3">Prospect</div>
-            <div className="w-1/4">Company</div>
-            <div className="w-1/4">Status</div>
-            <div className="w-1/6">Action</div>
-          </div>
-          <div className="flex-1 p-2 flex flex-col gap-2">
-            {[1, 2, 3, 4, 5].map((row) => (
-              <div key={row} className="h-16 rounded-xl hover:bg-gray-50 border border-transparent hover:border-gray-100 flex items-center px-4 gap-4 transition-colors">
-                <div className="w-1/3 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-200 to-gray-300"></div>
-                  <div>
-                    <div className="w-24 h-4 bg-gray-200 rounded mb-2"></div>
-                    <div className="w-32 h-3 bg-gray-100 rounded"></div>
-                  </div>
-                </div>
-                <div className="w-1/4">
-                  <div className="w-20 h-4 bg-gray-200 rounded"></div>
-                </div>
-                <div className="w-1/4">
-                  <div className="w-16 h-6 rounded-full bg-green-100 border border-green-200"></div>
-                </div>
-                <div className="w-1/6">
-                  <div className="w-20 h-8 rounded-lg bg-gray-100"></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-);
 
 
 // Lead Discovery Animated Image Component
