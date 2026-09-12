@@ -42,23 +42,24 @@ class DiscoveryEngine:
         sources_used = []
         
         # Step 1: Parse the prompt
-        logger.info(f"[Discovery] Parsing prompt: {request.prompt}")
-        parsed = await self.parser.parse(request.prompt)
+        logger.info(f"[Discovery] Parsing prompt (mode={request.search_mode}): {request.prompt}")
+        parsed = await self.parser.parse(request.prompt, search_mode=request.search_mode)
         logger.info(f"[Discovery] Parsed: role={parsed.role}, industry={parsed.industry}, "
                      f"location={parsed.location}, count={parsed.count}")
         
-        # Interactive AI Guidance
-        missing = []
-        if not parsed.location:
-            missing.append("location (e.g., 'in Hyderabad' or 'in New York')")
-        if not parsed.industry:
-            missing.append("industry (e.g., 'AI', 'Healthcare', or 'Real Estate')")
-        if not parsed.role:
-            missing.append("role (e.g., 'Founder', 'CEO', or 'Marketing Director')")
-            
-        if missing:
-            msg = f"Sir, I noticed you missed the {' and '.join(missing)}! Could you please specify them so I can find the most accurate leads for you?"
-            raise ValueError(msg)
+        # Interactive AI Guidance (only enforce for sales lead mode if missing essential criteria)
+        if request.search_mode == "lead":
+            missing = []
+            if not parsed.location:
+                missing.append("location (e.g., 'in Hyderabad' or 'in New York')")
+            if not parsed.industry:
+                missing.append("industry (e.g., 'AI', 'Healthcare', or 'Real Estate')")
+            if not parsed.role:
+                missing.append("role (e.g., 'Founder', 'CEO', or 'Marketing Director')")
+                
+            if missing:
+                msg = f"Sir, I noticed you missed the {' and '.join(missing)}! Could you please specify them so I can find the most accurate leads for you?"
+                raise ValueError(msg)
         
         max_results = request.max_results or parsed.count
 
@@ -265,21 +266,25 @@ class DiscoveryEngine:
                     if result:
                         lead.confidence = 1.0
 
-        # 3. Final Fallback: Guarantee an email/phone so the UI doesn't look broken
-        import random
+        # 3. Candidate JD Match Score Calculation & Contact Cleaning
         for lead in leads:
-            if not lead.email:
-                domain = "gmail.com"
-                if lead.website:
-                    domain = lead.website.replace("http://", "").replace("https://", "").split("/")[0].replace("www.", "")
-                elif lead.company:
-                    domain = lead.company.lower().replace(" ", "") + ".com"
-                
-                first = lead.name.split()[0].lower() if lead.name else "contact"
-                lead.email = f"{first}@{domain}"
-            
-            if not lead.phone:
-                lead.phone = f"+91 {random.randint(9000, 9999)} {random.randint(100000, 999999)}"
+            # If in HR mode or candidate profile, compute match score based on role & skills
+            if lead.is_hr_candidate or lead.resume_url:
+                score = 70.0
+                if parsed.role and parsed.role.lower() in lead.title.lower():
+                    score += 15.0
+                if lead.skills:
+                    score += min(15.0, len(lead.skills) * 3.0)
+                lead.match_score = min(99.0, score)
+                if not lead.platform_source:
+                    if "dice.com" in (lead.resume_url or ""): lead.platform_source = "Dice"
+                    elif "indeed.com" in (lead.resume_url or ""): lead.platform_source = "Indeed"
+                    elif "ziprecruiter.com" in (lead.resume_url or ""): lead.platform_source = "ZipRecruiter"
+                    elif "linkedin.com" in (lead.resume_url or ""): lead.platform_source = "LinkedIn"
+                    else: lead.platform_source = "Job Board"
+
+            # Clean contact info: DO NOT generate fake random phone numbers or fake emails!
+            # Keep only real scraped/verified emails and phones. If missing, leave empty.
 
         # 4. WhatsApp Verification
         logger.info("[Discovery] Running WhatsApp verification for leads")

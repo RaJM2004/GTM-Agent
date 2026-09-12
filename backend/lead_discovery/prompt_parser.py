@@ -12,7 +12,12 @@ import logging
 import re
 from typing import Optional
 
-from openai import AsyncOpenAI
+try:
+    from openai import AsyncOpenAI
+    HAS_OPENAI = True
+except ImportError:
+    AsyncOpenAI = None
+    HAS_OPENAI = False
 
 from config import settings
 from schemas.discovery import ParsedQuery
@@ -66,18 +71,37 @@ class PromptParser:
     """Parses natural language discovery prompts using Groq."""
 
     def __init__(self):
-        if settings.OPENAI_API_KEY:
+        if HAS_OPENAI and settings.OPENAI_API_KEY:
             self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
             self.model = "gpt-4o-mini"
         else:
             self.client = None
-            logger.warning("OPENAI_API_KEY not set - using fallback regex parser")
+            logger.warning("OPENAI_API_KEY not set or openai package missing - using fallback regex parser")
 
-    async def parse(self, prompt: str) -> ParsedQuery:
-        """Parse a natural language prompt into structured search parameters."""
-        if self.client:
-            return await self._parse_with_openai(prompt)
-        return self._parse_with_regex(prompt)
+    async def parse(self, prompt: str, search_mode: str = "lead") -> ParsedQuery:
+        """Parse a natural language prompt or Job Description into structured search parameters."""
+        parsed = await self._parse_with_openai(prompt) if self.client else self._parse_with_regex(prompt)
+        
+        # If in HR candidate search mode, inject specific search queries for Dice, Indeed, ZipRecruiter, and LinkedIn
+        if search_mode == "hr":
+            role = parsed.role or "Software Engineer"
+            loc = parsed.location or ""
+            kw = " ".join(parsed.keywords[:3]) if parsed.keywords else ""
+            
+            hr_queries = [
+                f'site:dice.com/candidates "{role}" {loc} {kw}'.strip(),
+                f'site:dice.com/job-seeker "{role}" {loc}'.strip(),
+                f'site:indeed.com/r "{role}" {loc}'.strip(),
+                f'site:indeed.com/resume "{role}" {loc}'.strip(),
+                f'site:ziprecruiter.com/candidate "{role}" {loc}'.strip(),
+                f'site:linkedin.com/in/ "{role}" resume CV {loc}'.strip(),
+                f'"{role}" candidate profile resume {loc} site:dice.com OR site:indeed.com OR site:ziprecruiter.com'.strip(),
+                f'"{role}" resume {kw} {loc} contact email phone'.strip()
+            ]
+            # Prepend HR specific queries
+            parsed.search_queries = hr_queries + parsed.search_queries
+            
+        return parsed
 
     async def _parse_with_openai(self, prompt: str) -> ParsedQuery:
         """Use OpenAI to parse the prompt."""
