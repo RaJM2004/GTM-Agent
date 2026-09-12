@@ -95,7 +95,7 @@ class DiscoveryEngine:
                      f"(search={len(search_leads)}, maps={len(maps_leads)})")
 
         # Step 4: Enrich leads with web scraping for contacts
-        enriched = await self._enrich_leads(all_leads)
+        enriched = await self._enrich_leads(all_leads, request, parsed)
         if any(l.email or l.phone for l in enriched):
             sources_used.append("web_scraping")
 
@@ -143,7 +143,7 @@ class DiscoveryEngine:
             message=f"Found {len(final_leads)} leads matching your criteria"
         )
 
-    async def _enrich_leads(self, leads: List[LeadContact]) -> List[LeadContact]:
+    async def _enrich_leads(self, leads: List[LeadContact], request: DiscoveryRequest, parsed: ParsedQuery) -> List[LeadContact]:
         """Enrich leads by merging Maps data into Person leads, scraping, and Apollo."""
         
         # 0. Cross-pollinate data! 
