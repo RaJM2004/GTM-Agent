@@ -22,6 +22,7 @@ from lead_discovery.maps_scraper import GoogleMapsScraper
 from lead_discovery.web_scraper import WebContactScraper
 from lead_discovery.email_finder import EmailFinder
 from lead_discovery.apollo_enrichment import ApolloEnrichment
+from lead_discovery.person_validator import is_valid_person_name
 
 logger = logging.getLogger(__name__)
 
@@ -42,24 +43,23 @@ class DiscoveryEngine:
         sources_used = []
         
         # Step 1: Parse the prompt
-        logger.info(f"[Discovery] Parsing prompt (mode={request.search_mode}): {request.prompt}")
-        parsed = await self.parser.parse(request.prompt, search_mode=request.search_mode)
+        logger.info(f"[Discovery] Parsing prompt: {request.prompt}")
+        parsed = await self.parser.parse(request.prompt)
         logger.info(f"[Discovery] Parsed: role={parsed.role}, industry={parsed.industry}, "
                      f"location={parsed.location}, count={parsed.count}")
         
-        # Interactive AI Guidance (only enforce for sales lead mode if missing essential criteria)
-        if request.search_mode == "lead":
-            missing = []
-            if not parsed.location:
-                missing.append("location (e.g., 'in Hyderabad' or 'in New York')")
-            if not parsed.industry:
-                missing.append("industry (e.g., 'AI', 'Healthcare', or 'Real Estate')")
-            if not parsed.role:
-                missing.append("role (e.g., 'Founder', 'CEO', or 'Marketing Director')")
-                
-            if missing:
-                msg = f"Sir, I noticed you missed the {' and '.join(missing)}! Could you please specify them so I can find the most accurate leads for you?"
-                raise ValueError(msg)
+        # Interactive AI Guidance
+        missing = []
+        if not parsed.location:
+            missing.append("location (e.g., 'in Hyderabad' or 'in New York')")
+        if not parsed.industry:
+            missing.append("industry (e.g., 'AI', 'Healthcare', or 'Real Estate')")
+        if not parsed.role:
+            missing.append("role (e.g., 'Founder', 'CEO', or 'Marketing Director')")
+            
+        if missing:
+            msg = f"Sir, I noticed you missed the {' and '.join(missing)}! Could you please specify them so I can find the most accurate leads for you?"
+            raise ValueError(msg)
         
         max_results = request.max_results or parsed.count
 
@@ -89,13 +89,37 @@ class DiscoveryEngine:
             if maps_leads:
                 sources_used.append("google_maps")
 
-        # Step 3: Merge all leads
-        all_leads = list(search_leads) + list(maps_leads)
-        logger.info(f"[Discovery] Total raw leads: {len(all_leads)} "
-                     f"(search={len(search_leads)}, maps={len(maps_leads)})")
+        # Step 3: Handle People vs Company queries
+        raw_maps = maps_leads if isinstance(maps_leads, list) else []
+        raw_search = search_leads if isinstance(search_leads, list) else []
 
-        # Step 4: Enrich leads with web scraping for contacts
-        enriched = await self._enrich_leads(all_leads, request, parsed)
+        if parsed.role:
+            # User specifically asked for individual people (e.g. Professor, Founder, CEO)
+            # 1. Filter search leads to genuine people
+            all_leads = [l for l in raw_search if is_valid_person_name(l.name)]
+
+            # 2. Use companies found in Maps to discover real people at those companies
+            if len(all_leads) < max_results and raw_maps:
+                target_companies = [m.company for m in raw_maps if m.company][:6]
+                company_queries = [
+                    f'site:linkedin.com/in/ "{c}" "{parsed.role}"'
+                    for c in target_companies
+                ]
+                if company_queries:
+                    logger.info(f"[Discovery] Searching people at {len(target_companies)} companies from Maps")
+                    extra_leads = await self.search_scraper.search(company_queries, max_results=max_results - len(all_leads))
+                    for el in extra_leads:
+                        if is_valid_person_name(el.name):
+                            all_leads.append(el)
+        else:
+            # General query without a specific person role (e.g. "Find AI companies in Hyderabad")
+            all_leads = list(raw_search) + list(raw_maps)
+
+        logger.info(f"[Discovery] Total qualified leads: {len(all_leads)} "
+                     f"(search={len(raw_search)}, maps={len(raw_maps)})")
+
+        # Step 4: Enrich leads with web scraping, Maps metadata, and Apollo
+        enriched = await self._enrich_leads(all_leads, maps_leads=raw_maps, user_id=request.user_id)
         if any(l.email or l.phone for l in enriched):
             sources_used.append("web_scraping")
 
@@ -143,21 +167,22 @@ class DiscoveryEngine:
             message=f"Found {len(final_leads)} leads matching your criteria"
         )
 
-    async def _enrich_leads(self, leads: List[LeadContact], request: DiscoveryRequest, parsed: ParsedQuery) -> List[LeadContact]:
-        """Enrich leads by merging Maps data into Person leads, scraping, and Apollo."""
+    async def _enrich_leads(self, leads: List[LeadContact], maps_leads: List[LeadContact] = None, user_id: str = "") -> List[LeadContact]:
+        """Enrich leads by merging Maps metadata into Person leads, scraping, Apollo, and Reacher."""
+        import re
         
-        # 0. Cross-pollinate data! 
-        # Maps provides phone/website for companies. DDG provides people for companies.
+        # 0. Cross-pollinate data from Maps
+        # Maps provides phone/website for businesses.
         company_to_maps = {}
-        for lead in leads:
-            if lead.source == "google_maps" and lead.company:
-                # Store the maps lead data for this company
-                key = lead.company.lower().split()[0] # e.g. "kore.ai" -> "kore.ai", "AI Technologies" -> "ai"
-                company_to_maps[key] = lead
+        source_maps = maps_leads or []
+        for map_lead in source_maps:
+            if map_lead.company:
+                key = map_lead.company.lower().split()[0]
+                company_to_maps[key] = map_lead
 
         # Assign maps data to people leads
         for lead in leads:
-            if lead.source != "google_maps" and lead.company:
+            if lead.company:
                 key = lead.company.lower().split()[0]
                 match = company_to_maps.get(key)
                 if match:
@@ -266,32 +291,39 @@ class DiscoveryEngine:
                     if result:
                         lead.confidence = 1.0
 
-        # 3. Candidate JD Match Score Calculation & Contact Cleaning
+        # 3. Predict work email on legitimate company/institution domains only
+        # Never generate emails for search engines, directories, or news portals!
+        BLACKLISTED_EMAIL_DOMAINS = {
+            "crunchbase.com", "news.crunchbase.com", "linkedin.com", "wellfound.com",
+            "google.com", "duckduckgo.com", "facebook.com", "twitter.com", "youtube.com"
+        }
         for lead in leads:
-            # If in HR mode or candidate profile, compute match score based on role & skills
-            if lead.is_hr_candidate or lead.resume_url:
-                score = 70.0
-                if parsed.role and parsed.role.lower() in lead.title.lower():
-                    score += 15.0
-                if lead.skills:
-                    score += min(15.0, len(lead.skills) * 3.0)
-                lead.match_score = min(99.0, score)
-                if not lead.platform_source:
-                    if "dice.com" in (lead.resume_url or ""): lead.platform_source = "Dice"
-                    elif "indeed.com" in (lead.resume_url or ""): lead.platform_source = "Indeed"
-                    elif "ziprecruiter.com" in (lead.resume_url or ""): lead.platform_source = "ZipRecruiter"
-                    elif "linkedin.com" in (lead.resume_url or ""): lead.platform_source = "LinkedIn"
-                    else: lead.platform_source = "Job Board"
+            if not lead.email and lead.name:
+                domain = ""
+                if lead.website:
+                    d = self.email_finder.extract_domain_from_url(lead.website)
+                    if d and d not in BLACKLISTED_EMAIL_DOMAINS:
+                        domain = d
+                elif lead.company:
+                    clean_c = re.sub(r'[^a-zA-Z0-9]', '', lead.company).lower()
+                    if clean_c and len(clean_c) > 2 and clean_c not in {"university", "college", "school", "technologies", "solutions"}:
+                        domain = f"{clean_c}.com"
 
-            # Clean contact info: DO NOT generate fake random phone numbers or fake emails!
-            # Keep only real scraped/verified emails and phones. If missing, leave empty.
+                if domain:
+                    candidates = self.email_finder.generate_possible_emails(lead.name, domain)
+                    if candidates:
+                        lead.email = candidates[0]
+                        lead.confidence = min(lead.confidence, 0.5)
+                        lead.is_verified = False
+
+            # Note: We keep lead.phone empty if not genuinely found; no fake numbers are fabricated.
 
         # 4. WhatsApp Verification
         logger.info("[Discovery] Running WhatsApp verification for leads")
         try:
             from database import db
-            if db is not None:
-                user = await db.users.find_one({"user_id": request.user_id})
+            if db is not None and user_id:
+                user = await db.users.find_one({"user_id": user_id})
                 twilio_creds = user.get("integrations", {}).get("twilio") if user else None
                 
                 if twilio_creds and twilio_creds.get("account_sid") and twilio_creds.get("auth_token"):

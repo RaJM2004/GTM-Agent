@@ -47,14 +47,14 @@ class GoogleMapsScraper:
                     seen.add(name.lower())
                     
                     lead = LeadContact(
-                        name=f"{role.title()} at {name}" if role else name,
-                        title=role.title() if role else "Company Contact",
+                        name=name,
+                        title=f"{industry.title()} Business" if industry else "Company",
                         company=name,
                         phone=place.get("nationalPhoneNumber", ""),
                         website=place.get("websiteUri", ""),
                         location=place.get("formattedAddress", ""),
                         source="google_maps",
-                        confidence=0.65,
+                        confidence=0.60,
                         industry=industry,
                     )
                     all_leads.append(lead)

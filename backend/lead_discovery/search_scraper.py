@@ -1,6 +1,7 @@
 """
-DuckDuckGo Search Scraper - Uses ddgs for keyless, free search results.
-Primary data source for finding real people matching discovery criteria.
+Search Scraper - Uses DuckDuckGo (ddgs) to find genuine people profiles
+from LinkedIn and Google Web (university faculty, team bios, conference speakers).
+Strictly validates that results are real individuals, not companies or news articles.
 """
 
 import logging
@@ -8,29 +9,23 @@ import re
 import asyncio
 from typing import List, Dict, Optional
 import httpx
-from bs4 import BeautifulSoup
-try:
-    from ddgs import DDGS
-except ImportError:
-    try:
-        from duckduckgo_search import DDGS
-    except ImportError:
-        DDGS = None
+from ddgs import DDGS
 
 from config import settings
 from schemas.discovery import LeadContact
+from lead_discovery.person_validator import is_valid_person_name, clean_person_name
 
 logger = logging.getLogger(__name__)
 
+
 class GoogleSearchScraper:
     def __init__(self):
-        # Kept the name GoogleSearchScraper to not break other imports,
-        # but under the hood we use DuckDuckGo / HTTPX keyless search
         self.client = httpx.AsyncClient(timeout=settings.REQUEST_TIMEOUT)
 
     async def search(self, queries: List[str], max_results: int = 50) -> List[LeadContact]:
         all_leads: List[LeadContact] = []
         seen_names = set()
+        
         for query in queries:
             if len(all_leads) >= max_results:
                 break
@@ -44,225 +39,214 @@ class GoogleSearchScraper:
                         all_leads.append(lead)
             except Exception as e:
                 logger.error(f"Search failed for '{query}': {e}")
-        logger.info(f"Search found {len(all_leads)} leads from {len(queries)} queries")
+                
+        logger.info(f"Search found {len(all_leads)} verified people leads from {len(queries)} queries")
         return all_leads
 
-    async def _execute_search(self, query: str, num: int = 40) -> Dict:
+    async def _execute_search(self, query: str, num: int = 35) -> Dict:
         def fetch():
             results = []
-            if DDGS:
-                try:
-                    with DDGS() as ddgs:
-                        ddgs_results = ddgs.text(query, max_results=num)
-                        if ddgs_results:
-                            for r in ddgs_results:
-                                results.append({
-                                    "title": r.get("title", ""),
-                                    "link": r.get("href", ""),
-                                    "snippet": r.get("body", "")
-                                })
-                except Exception as e:
-                    logger.error(f"DDGS fetch error: {e}")
+            try:
+                with DDGS() as ddgs:
+                    ddgs_results = ddgs.text(query, max_results=num)
+                    if ddgs_results:
+                        for r in ddgs_results:
+                            results.append({
+                                "title": r.get("title", ""),
+                                "link": r.get("href", ""),
+                                "snippet": r.get("body", "")
+                            })
+            except Exception as e:
+                logger.error(f"DDGS fetch error for '{query}': {e}")
             return {"organic_results": results}
 
         try:
-            res = await asyncio.to_thread(fetch)
-            if res.get("organic_results"):
-                return res
-            # Fallback to keyless HTML search via httpx if DDGS package returns empty or fails
-            return await self._execute_html_search(query, num)
+            return await asyncio.to_thread(fetch)
         except Exception as e:
             logger.error(f"DuckDuckGo search failed: {e}")
             return {"organic_results": []}
 
-    async def _execute_html_search(self, query: str, num: int = 40) -> Dict:
-        results = []
-        try:
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            resp = await self.client.post("https://html.duckduckgo.com/html/", data={"q": query}, headers=headers)
-            if resp.status_code == 200:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for a in soup.select("a.result__url"):
-                    link = a.get("href", "")
-                    title_elem = a.find_parent("div", class_="result__body")
-                    title = title_elem.select_one("a.result__title").text.strip() if title_elem and title_elem.select_one("a.result__title") else ""
-                    snippet = title_elem.select_one("a.result__snippet").text.strip() if title_elem and title_elem.select_one("a.result__snippet") else ""
-                    if link and title:
-                        results.append({"title": title, "link": link, "snippet": snippet})
-        except Exception as e:
-            logger.error(f"HTML search fallback error: {e}")
-        return {"organic_results": results[:num]}
-
     def _extract_leads(self, results: Dict) -> List[LeadContact]:
         leads = []
         for r in results.get("organic_results", []):
-            lead = self._parse_result(r.get("title",""), r.get("link",""), r.get("snippet",""))
-            if lead and lead.name:
+            lead = self._parse_result(r.get("title", ""), r.get("link", ""), r.get("snippet", ""))
+            if lead and lead.name and is_valid_person_name(lead.name):
                 leads.append(lead)
         return leads
 
     def _parse_result(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
-        if "dice.com" in link:
-            return self._parse_dice(title, link, snippet)
-        if "indeed.com" in link:
-            return self._parse_indeed(title, link, snippet)
-        if "ziprecruiter.com" in link:
-            return self._parse_ziprecruiter(title, link, snippet)
         if "linkedin.com/in/" in link:
             return self._parse_linkedin(title, link, snippet)
-        if "crunchbase.com" in link:
+        if "crunchbase.com/person/" in link:
             return self._parse_crunchbase(title, link, snippet)
         return self._parse_general(title, link, snippet)
 
-    def _extract_skills(self, text: str) -> List[str]:
-        """Helper to extract common technical and business skills from snippet/text."""
-        common_skills = [
-            "React", "Node.js", "Python", "Java", "JavaScript", "TypeScript", "C++", "Go", "Ruby",
-            "SQL", "PostgreSQL", "MongoDB", "AWS", "Azure", "Docker", "Kubernetes", "DevOps",
-            "Machine Learning", "AI", "Deep Learning", "Data Engineering", "Tailwind", "REST API",
-            "Salesforce", "HubSpot", "Product Management", "Scrum", "Agile", "HR", "Recruiting"
-        ]
-        found = []
-        for skill in common_skills:
-            if re.search(r'\b' + re.escape(skill) + r'\b', text, re.I):
-                found.append(skill)
-        return found[:6]
-
-    def _parse_dice(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
-        clean = title.replace(" - Dice.com", "").replace(" | Dice", "").replace(" - Dice", "").strip()
-        parts = [p.strip() for p in clean.split(" - ")]
-        name = parts[0] if parts else "Dice Candidate"
-        job_title = parts[1] if len(parts) > 1 else "Candidate Profile"
-        skills = self._extract_skills(snippet + " " + title)
-        email_m = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', snippet)
-        phone_m = re.search(r'(?:\+\d{1,3}[-.\s]?)?\(?\d{2,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}', snippet)
-
-        return LeadContact(
-            name=name,
-            title=job_title,
-            company="Dice Candidate Pool",
-            email=email_m.group(0) if email_m else "",
-            phone=phone_m.group(0).strip() if phone_m else "",
-            website=link,
-            resume_url=link,
-            platform_source="Dice",
-            is_hr_candidate=True,
-            skills=skills,
-            source="dice_candidates",
-            confidence=0.9
-        )
-
-    def _parse_indeed(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
-        clean = title.replace(" - Indeed.com", "").replace(" | Indeed", "").replace(" Resumes", "").replace(" Resume", "").strip()
-        parts = [p.strip() for p in clean.split(" - ")]
-        name = parts[0] if parts else "Indeed Candidate"
-        job_title = parts[1] if len(parts) > 1 else "Candidate Profile"
-        skills = self._extract_skills(snippet + " " + title)
-        email_m = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', snippet)
-        phone_m = re.search(r'(?:\+\d{1,3}[-.\s]?)?\(?\d{2,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}', snippet)
-
-        return LeadContact(
-            name=name,
-            title=job_title,
-            company="Indeed Candidate Pool",
-            email=email_m.group(0) if email_m else "",
-            phone=phone_m.group(0).strip() if phone_m else "",
-            website=link,
-            resume_url=link,
-            platform_source="Indeed",
-            is_hr_candidate=True,
-            skills=skills,
-            source="indeed_resumes",
-            confidence=0.9
-        )
-
-    def _parse_ziprecruiter(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
-        clean = title.replace(" - ZipRecruiter", "").replace(" | ZipRecruiter", "").strip()
-        parts = [p.strip() for p in clean.split(" - ")]
-        name = parts[0] if parts else "ZipRecruiter Candidate"
-        job_title = parts[1] if len(parts) > 1 else "Candidate Profile"
-        skills = self._extract_skills(snippet + " " + title)
-        email_m = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', snippet)
-        phone_m = re.search(r'(?:\+\d{1,3}[-.\s]?)?\(?\d{2,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}', snippet)
-
-        return LeadContact(
-            name=name,
-            title=job_title,
-            company="ZipRecruiter Candidate Pool",
-            email=email_m.group(0) if email_m else "",
-            phone=phone_m.group(0).strip() if phone_m else "",
-            website=link,
-            resume_url=link,
-            platform_source="ZipRecruiter",
-            is_hr_candidate=True,
-            skills=skills,
-            source="ziprecruiter_candidates",
-            confidence=0.9
-        )
-
     def _parse_linkedin(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
-        parts = title.replace(" | LinkedIn","").replace(" - LinkedIn","")
-        segs = [s.strip() for s in parts.split(" - ")]
-        name = re.sub(r'[^\w\s.\-]', '', segs[0]).strip() if segs else ""
+        """Extract person profile from LinkedIn Google/DDG result."""
+        # Clean title suffix
+        clean_t = re.sub(r'\s*[-–|:]\s*LinkedIn.*$', '', title, flags=re.I).strip()
+        
+        # Format usually: Name - Title - Company or Name – Title at Company – Location
+        segs = [s.strip() for s in re.split(r'\s*[-–|:]\s*', clean_t) if s.strip()]
+        if not segs:
+            return None
+
+        raw_name = segs[0]
+        name = clean_person_name(raw_name)
+
+        if not is_valid_person_name(name):
+            return None
+
         job_title = segs[1] if len(segs) > 1 else ""
         company = segs[2] if len(segs) > 2 else ""
+
         if " at " in job_title:
-            p = job_title.split(" at ", 1)
-            job_title, company = p[0].strip(), p[1].strip()
-        if not name or len(name) < 2:
-            return None
-        skills = self._extract_skills(snippet + " " + title)
-        return LeadContact(
-            name=name,
-            title=job_title,
-            company=company or "LinkedIn Profile",
-            linkedin_url=link,
-            resume_url=link,
-            platform_source="LinkedIn",
-            skills=skills,
-            source="google_linkedin",
-            confidence=0.75
-        )
+            parts = job_title.split(" at ", 1)
+            job_title, company = parts[0].strip(), parts[1].strip()
 
-    def _parse_crunchbase(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
-        name = title.replace(" - Crunchbase Person Profile","").replace(" - Crunchbase","").strip()
-        company, job_title = "", ""
-        m = re.search(r'(?:is|as)\s+(?:the\s+)?(\w+(?:\s+\w+)?)\s+(?:of|at)\s+(.+?)(?:\.|,|$)', snippet, re.I)
-        if m:
-            job_title, company = m.group(1).strip(), m.group(2).strip()
-        if not name or len(name) < 2:
-            return None
-        return LeadContact(name=name, title=job_title, company=company, website=link, source="google_crunchbase", confidence=0.7)
+        # If company not in title segments, attempt extraction from snippet
+        if not company:
+            current_m = re.search(r'(?:Current|Experience):\s*([^·\n]+)', snippet, re.I)
+            if current_m:
+                curr_text = current_m.group(1).strip()
+                if " at " in curr_text:
+                    company = curr_text.split(" at ", 1)[1].strip()
+                else:
+                    company = curr_text
 
-    def _parse_general(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
+        # Extract email if directly present in snippet
         email_m = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', snippet)
+        email = email_m.group(0) if email_m and not email_m.group(0).endswith("linkedin.com") else ""
+
+        # Extract phone if present
         phone_m = re.search(r'(?:\+\d{1,3}[-.\s]?)?\(?\d{2,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}', snippet)
-        name, job_title, company = "", "", ""
-        m = re.match(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\s*[-|,]\s*(.+)', title)
-        if m:
-            name = m.group(1).strip()
-            rem = m.group(2).strip()
-            kws = ['founder','ceo','cto','director','head','vp','manager','lead','president']
-            if any(k in rem.lower() for k in kws):
-                job_title = rem.split(" at ")[0].strip()
-                if " at " in rem:
-                    company = rem.split(" at ")[1].strip()
-            else:
-                company = rem
-        if not name or not re.match(r'^[A-Za-z]+(?:\s+[A-Za-z]+)+$', name):
-            return None
-        skills = self._extract_skills(snippet + " " + title)
+        phone = phone_m.group(0).strip() if phone_m else ""
+
+        # Extract location if in snippet (e.g. "Location: Hyderabad", "Hyderabad, Telangana")
+        loc_m = re.search(r'(?:Location:\s*)?([A-Za-z\s]+(?:,\s*[A-Za-z\s]+)*)', snippet)
+        location = ""
+        for city in ["Hyderabad", "Bengaluru", "Bangalore", "Mumbai", "Delhi", "Pune", "Chennai", "San Francisco", "New York", "London"]:
+            if city.lower() in snippet.lower() or city.lower() in clean_t.lower():
+                location = city
+                break
+
         return LeadContact(
             name=name,
             title=job_title,
             company=company,
-            email=email_m.group(0) if email_m else "",
-            phone=phone_m.group(0).strip() if phone_m else "",
+            email=email,
+            phone=phone,
+            linkedin_url=link,
+            location=location,
+            source="linkedin",
+            confidence=0.85
+        )
+
+    def _parse_crunchbase(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
+        """Extract person profile from Crunchbase /person/ profile."""
+        clean_t = title.replace(" - Crunchbase Person Profile", "").replace(" - Crunchbase", "").strip()
+        name = clean_person_name(clean_t)
+
+        if not is_valid_person_name(name):
+            return None
+
+        company, job_title = "", ""
+        m = re.search(r'(?:is|as)\s+(?:the\s+)?(\w+(?:\s+\w+)?)\s+(?:of|at)\s+(.+?)(?:\.|,|$)', snippet, re.I)
+        if m:
+            job_title, company = m.group(1).strip(), m.group(2).strip()
+
+        return LeadContact(
+            name=name,
+            title=job_title,
+            company=company,
             website=link,
-            resume_url=link if any(w in link.lower() for w in ["resume", "cv", "candidate", "profile"]) else "",
-            skills=skills,
+            source="crunchbase",
+            confidence=0.80
+        )
+
+    def _parse_general(self, title: str, link: str, snippet: str) -> Optional[LeadContact]:
+        """
+        Extract real people from university faculty directories, speaker bios,
+        leadership pages, and research profiles on Google/Web.
+        """
+        name = ""
+        job_title = ""
+        company = ""
+
+        # Pattern 1: Title starts with honorific (e.g., "Dr. John Doe - Professor of AI - IIT Hyderabad")
+        honorific_m = re.match(r'^(?:Prof\.|Dr\.|Mr\.|Ms\.|Mrs\.)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\.]+){1,3})\s*[-–|:]\s*(.+)', title, re.I)
+        if honorific_m:
+            candidate_name = clean_person_name(title.split("-")[0].split("|")[0].split("–")[0])
+            if is_valid_person_name(candidate_name):
+                name = candidate_name
+                rem = honorific_m.group(2).strip()
+                if " - " in rem or " | " in rem:
+                    parts = re.split(r'\s*[-–|]\s*', rem)
+                    job_title = parts[0].strip()
+                    company = parts[1].strip()
+                elif " at " in rem:
+                    p = rem.split(" at ", 1)
+                    job_title, company = p[0].strip(), p[1].strip()
+                else:
+                    job_title = rem
+
+        # Pattern 2: Standard "Name - Role - Organization/University"
+        if not name:
+            segments = [s.strip() for s in re.split(r'\s*[-–|:]\s*', title) if s.strip()]
+            if len(segments) >= 2:
+                candidate = clean_person_name(segments[0])
+                if is_valid_person_name(candidate):
+                    # Make sure this is a person profile, not an article
+                    # Check if second segment looks like a role/title or affiliation
+                    kws = ['professor', 'faculty', 'director', 'head', 'dean', 'founder', 'ceo', 'cto', 'researcher', 'scientist', 'chair', 'lead', 'fellow', 'lecturer']
+                    rem_text = " ".join(segments[1:]).lower()
+                    if any(k in rem_text for k in kws) or any(k in snippet.lower() for k in kws):
+                        name = candidate
+                        job_title = segments[1]
+                        if len(segments) > 2:
+                            company = segments[2]
+                        elif " at " in job_title:
+                            p = job_title.split(" at ", 1)
+                            job_title, company = p[0].strip(), p[1].strip()
+
+        # Pattern 3: Snippet bio extraction: "Dr. / Prof. [Name] is a [Title] at [Company]"
+        if not name:
+            bio_m = re.search(r'(?:Dr\.|Prof\.|Mr\.|Ms\.)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\.]+){1,3})\s+(?:is|serves as|works as)\s+(?:a|the)?\s*([A-Za-z\s]+?)\s+(?:at|in|of)\s+([A-Za-z0-9\s,\.\-]+?)(?:\.|\;|\n|$)', snippet, re.I)
+            if bio_m:
+                candidate = clean_person_name(bio_m.group(1))
+                if is_valid_person_name(candidate):
+                    name = candidate
+                    job_title = bio_m.group(2).strip()
+                    company = bio_m.group(3).strip()
+
+        # If we couldn't find a valid person name, drop this web result (it's likely a generic article or company)
+        if not name or not is_valid_person_name(name):
+            return None
+
+        # Clean job title and company from page header suffixes
+        job_title = re.sub(r'\s*(?:Faculty Listing|Faculty Directory|Overview|Home|Members|Staff).*$', '', job_title, flags=re.I).strip()
+        company = re.sub(r'\s*(?:Faculty Listing|Faculty Directory|Overview|Home|Members|Staff).*$', '', company, flags=re.I).strip()
+
+        if len(job_title) > 60:
+            job_title = job_title[:60].strip()
+
+        # Extract direct contact info from snippet if available
+        email_m = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', snippet)
+        email = email_m.group(0) if email_m else ""
+        
+        # Don't take generic domain emails like info@ or office@ if we want personal
+        phone_m = re.search(r'(?:\+\d{1,3}[-.\s]?)?\(?\d{2,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}', snippet)
+        phone = phone_m.group(0).strip() if phone_m else ""
+
+        return LeadContact(
+            name=name,
+            title=job_title,
+            company=company,
+            email=email,
+            phone=phone,
+            website=link,
             source="google_web",
-            confidence=0.5
+            confidence=0.70
         )
 
     async def close(self):
