@@ -20,19 +20,19 @@ router = APIRouter(prefix="/api/leads", tags=["leads"])
 
 class LeadItem(BaseModel):
     id: str = ""
-    name: str = ""
-    title: str = ""
-    company: str = ""
-    email: str = ""
-    phone: str = ""
-    linkedin_url: str = ""
-    website: str = ""
-    location: str = ""
-    industry: str = ""
+    name: Optional[str] = ""
+    title: Optional[str] = ""
+    company: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    linkedin_url: Optional[str] = ""
+    website: Optional[str] = ""
+    location: Optional[str] = ""
+    industry: Optional[str] = ""
     confidence: float = 0.0
-    source: str = ""
-    discovery_prompt: str = ""
-    company_size: str = ""
+    source: Optional[str] = ""
+    discovery_prompt: Optional[str] = ""
+    company_size: Optional[str] = ""
     is_verified: bool = False
     has_whatsapp: Optional[bool] = None
     reply_status: Optional[str] = None
@@ -70,6 +70,8 @@ def resolve_presentation_email(name: str, company: str, existing_email: str = ""
         return f"{parts[0]}.{parts[-1]}@{clean_c}.com"
     elif len(parts) == 1:
         return f"{parts[0]}@{clean_c}.com"
+    return f"contact@{clean_c}.com"
+
 def clean_real_phone(phone: str) -> str:
     if not phone:
         return ""
@@ -117,7 +119,7 @@ async def get_all_leads(user_id: str = ""):
             if industry not in industry_map:
                 industry_map[industry] = {"leads": [], "prompts": set()}
 
-            lead_email = resolve_presentation_email(doc.get("name", ""), doc.get("company", ""), doc.get("email", ""))
+            lead_email = (resolve_presentation_email(doc.get("name") or "", doc.get("company") or "", doc.get("email") or "") or "contact@enterprise.com").strip()
             src = doc.get("source", "")
             raw_phone = doc.get("phone", "")
             # Only display authentic scraped phone numbers (from Google Maps/Places API or verified businesses)
@@ -139,19 +141,19 @@ async def get_all_leads(user_id: str = ""):
 
             industry_map[industry]["leads"].append(LeadItem(
                 id=str(doc.get("_id", "")),
-                name=doc.get("name", ""),
-                title=doc.get("title", ""),
-                company=doc.get("company", ""),
+                name=str(doc.get("name") or "Contact"),
+                title=str(doc.get("title") or ""),
+                company=str(doc.get("company") or ""),
                 email=lead_email,
-                phone=lead_phone,
-                linkedin_url=doc.get("linkedin_url", ""),
-                website=doc.get("website", ""),
-                location=doc.get("location", ""),
-                industry=industry,
-                confidence=doc.get("confidence", 1.0 if doc.get("is_verified", False) else 0.5),
-                source=doc.get("source", ""),
-                discovery_prompt=doc.get("discovery_prompt", ""),
-                company_size=doc.get("company_size", ""),
+                phone=str(lead_phone or ""),
+                linkedin_url=str(doc.get("linkedin_url") or ""),
+                website=str(doc.get("website") or ""),
+                location=str(doc.get("location") or ""),
+                industry=str(industry or "General"),
+                confidence=float(doc.get("confidence") or (1.0 if doc.get("is_verified", False) else 0.5)),
+                source=str(doc.get("source") or ""),
+                discovery_prompt=str(doc.get("discovery_prompt") or ""),
+                company_size=str(doc.get("company_size") or ""),
                 is_verified=bool(doc.get("is_verified", False)),
                 has_whatsapp=lead_has_wa,
                 reply_status=doc.get("reply_status", None),
