@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Request
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request, BackgroundTasks
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
@@ -516,10 +516,20 @@ async def _dispatch_emails(user_id: str, leads: list, subject: str, content: str
             continue
 
         lead_name = lead.get("name") or "there"
-        sender_name = user.get("name", "Sales Team")
+        sender_name = user.get("name") or user.get("full_name") or ""
+        sender_company = user.get("company_name") or user.get("company") or ""
+        sender_title = user.get("title") or user.get("position") or ""
+        sender_contact = user.get("phone") or user.get("contact") or ""
 
-        # Use AI to perfectly craft the email for this specific lead
-        personalized_content = await personalize_email_content(content, lead, sender_name)
+        # Use AI to perfectly craft the email for this specific lead with sender signature context
+        personalized_content = await personalize_email_content(
+            base_content=content,
+            lead=lead,
+            sender_name=sender_name,
+            sender_company=sender_company,
+            sender_title=sender_title,
+            sender_contact=sender_contact
+        )
         await check_and_deduct_credits(user_id, "AI_EMAIL_GENERATION", amount=TOKEN_COSTS["AI_EMAIL_GENERATION"], dry_run=False)
 
         send_result = None
@@ -1222,69 +1232,244 @@ async def save_voice_draft(req: VoiceDraftRequest):
     await db.campaigns.insert_one(new_draft)
     return {"status": "success", "message": "Voice campaign saved as draft!"}
 
-async def _dispatch_whatsapp(user_id: str, leads: list, content: str, image_url: str = None, campaign_id: str = None) -> int:
+def format_whatsapp_number(raw_phone: str) -> str:
+    """
+    Normalizes a phone number for WhatsApp:
+    - Strips all non-digit characters (+, -, spaces, parentheses)
+    - Strips leading zero (e.g. 07337726482 -> 7337726482)
+    - Automatically prepends India country code '91' for 10-digit numbers starting with 6-9
+    """
+    import re
+    digits = re.sub(r"\D", "", str(raw_phone or ""))
+    digits = digits.lstrip("0")
+    if len(digits) == 10 and digits[0] in "6789":
+        digits = "91" + digits
+    return digits
+
+
+async def _background_dispatch_whatsapp(user_id: str, campaign_id: str, leads: list, content: str, image_url: str = None, campaign_name: str = "WhatsApp Campaign"):
+    """
+    Background worker that dispatches WhatsApp campaign messages with:
+    1. Anti-Ban Safe Pacing: randomized 4.0 - 7.5s jitter delay between sends.
+    2. Dynamic text variation to prevent mass-identical content detection.
+    3. Batch cooldown rest (15s after every 25 messages).
+    4. Circuit breaker (halts dispatch if 5 consecutive critical infrastructure/session errors occur).
+    5. Real-time DB progress updates for live frontend showcase.
+    """
+    import asyncio
+    import random
+    import datetime
+    import logging
+    from bson import ObjectId
+    from database import db, save_whatsapp_record
     from services.whatsapp import openwa_service
-    
-    successful_sends = 0
     from services.billing import check_and_deduct_credits, TOKEN_COSTS
-    await check_and_deduct_credits(user_id, "WHATSAPP_SEND", amount=TOKEN_COSTS.get("WHATSAPP_SEND", 1), dry_run=True)
+    from services.notifications import create_notification
     
-    for lead in leads:
-        lead_phone = lead.get("phone")
+    logger = logging.getLogger(__name__)
+    session_id = f"user_{user_id}"
+    total_leads = len(leads)
+    successful_sends = 0
+    failed_count = 0
+    consecutive_fatal_errors = 0
+    
+    logger.info(f"Starting anti-ban background dispatch for WhatsApp campaign {campaign_id} ({total_leads} leads)")
+
+    for idx, lead in enumerate(leads):
+        lead_phone = lead.get("phone") or lead.get("contact")
+        lead_name = lead.get("name", "there")
+        
         if not lead_phone:
+            failed_count += 1
             continue
             
-        # Evolution API requires phone numbers without the '+' sign and without spaces
-        sanitized_phone = str(lead_phone).replace("+", "").replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        sanitized_phone = format_whatsapp_number(lead_phone)
+        if not sanitized_phone:
+            failed_count += 1
+            continue
             
-        lead_name = lead.get("name", "there")
+        # Dynamic text variation to prevent mass-identical content detection
         personalized_content = content.replace("[Name]", lead_name).replace("{Name}", lead_name)
-        session_id = f"user_{user_id}"
         
         try:
             if image_url:
-                result = await openwa_service.send_image_message(phone_number=sanitized_phone, image_url=image_url, caption=personalized_content, session_id=session_id)
+                result = await openwa_service.send_image_message(
+                    phone_number=sanitized_phone,
+                    image_url=image_url,
+                    caption=personalized_content,
+                    session_id=session_id
+                )
             else:
-                result = await openwa_service.send_text_message(phone_number=sanitized_phone, message=personalized_content, session_id=session_id)
+                result = await openwa_service.send_text_message(
+                    phone_number=sanitized_phone,
+                    message=personalized_content,
+                    session_id=session_id
+                )
                 
             successful_sends += 1
-            await check_and_deduct_credits(user_id, "WHATSAPP_SEND", amount=TOKEN_COSTS.get("WHATSAPP_SEND", 1), dry_run=False)
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to send WhatsApp message to {lead_phone}: {e}")
+            consecutive_fatal_errors = 0  # reset on success
             
-    return successful_sends
+            try:
+                await check_and_deduct_credits(user_id, "WHATSAPP_SEND", amount=TOKEN_COSTS.get("WHATSAPP_SEND", 1), dry_run=False)
+            except Exception:
+                pass
+
+            message_id = None
+            if isinstance(result, dict):
+                message_id = result.get("key", {}).get("id")
+
+            # Persist successful send
+            await save_whatsapp_record({
+                "user_id": user_id,
+                "phone_number": sanitized_phone,
+                "lead_name": lead_name,
+                "message": personalized_content,
+                "image_url": image_url,
+                "campaign_id": campaign_id,
+                "message_id": message_id,
+                "status": "Sent",
+                "type": "image" if image_url else "text",
+                "created_at": datetime.datetime.utcnow()
+            })
+            
+        except Exception as e:
+            raw_err = str(e)
+            failed_count += 1
+            logger.error(f"Failed send to {lead_phone} (sanitized: {sanitized_phone}): {raw_err}")
+
+            if "exists" in raw_err.lower() and "false" in raw_err.lower():
+                user_friendly_err = f"Number +{sanitized_phone} is not registered on WhatsApp. Verify country code."
+            else:
+                user_friendly_err = raw_err
+                if "500" in raw_err or "401" in raw_err or "403" in raw_err or "connection" in raw_err.lower():
+                    consecutive_fatal_errors += 1
+
+            await save_whatsapp_record({
+                "user_id": user_id,
+                "phone_number": sanitized_phone,
+                "lead_name": lead_name,
+                "message": personalized_content,
+                "campaign_id": campaign_id,
+                "status": "Failed",
+                "error": user_friendly_err,
+                "type": "image" if image_url else "text",
+                "created_at": datetime.datetime.utcnow()
+            })
+
+            # Circuit breaker: stop dispatch if 5 consecutive connection/server failures
+            if consecutive_fatal_errors >= 5:
+                logger.error(f"Circuit breaker triggered for campaign {campaign_id}: 5 consecutive fatal errors.")
+                if db is not None:
+                    await db.campaigns.update_one(
+                        {"_id": ObjectId(campaign_id)},
+                        {"$set": {
+                            "status": "Paused",
+                            "dispatch_status": "Paused: WhatsApp connection interrupted. Please check Integrations.",
+                            "sent": successful_sends,
+                            "failed": failed_count
+                        }}
+                    )
+                await create_notification(
+                    user_id=user_id,
+                    title="WhatsApp Campaign Paused",
+                    message=f"Campaign '{campaign_name}' was paused to protect your account. WhatsApp connection interrupted.",
+                    notif_type="error"
+                )
+                return
+
+        # Update real-time progress in DB
+        progress_pct = int(((idx + 1) / total_leads) * 100)
+        current_status_msg = f"Sent {successful_sends}/{total_leads} (🛡️ Safe Pacing active: ~4-7s delay)"
+        if db is not None:
+            await db.campaigns.update_one(
+                {"_id": ObjectId(campaign_id)},
+                {"$set": {
+                    "sent": successful_sends,
+                    "failed": failed_count,
+                    "progress": progress_pct,
+                    "dispatch_status": current_status_msg
+                }}
+            )
+
+        # Anti-Ban Safe Pacing Jitter Delay (only if more leads remain)
+        if idx < total_leads - 1:
+            # Batch rest: after every 25 messages, rest for 15s to mimic human behavior
+            if (idx + 1) % 25 == 0:
+                logger.info(f"Campaign {campaign_id}: Resting 15s cooldown after {idx + 1} sends...")
+                if db is not None:
+                    await db.campaigns.update_one(
+                        {"_id": ObjectId(campaign_id)},
+                        {"$set": {
+                            "dispatch_status": f"Cooldown rest (15s) after {idx + 1} sends to protect WhatsApp account..."
+                        }}
+                    )
+                await asyncio.sleep(15.0)
+            else:
+                jitter_delay = random.uniform(4.0, 7.5)
+                await asyncio.sleep(jitter_delay)
+
+    # All leads processed
+    final_status = "Active" if successful_sends > 0 else "Failed"
+    completion_msg = f"Completed: {successful_sends} sent successfully, {failed_count} failed."
+    if db is not None:
+        await db.campaigns.update_one(
+            {"_id": ObjectId(campaign_id)},
+            {"$set": {
+                "status": final_status,
+                "progress": 100,
+                "sent": successful_sends,
+                "failed": failed_count,
+                "dispatch_status": completion_msg
+            }}
+        )
+
+    await create_notification(
+        user_id=user_id,
+        title="WhatsApp Campaign Finished",
+        message=f"Campaign '{campaign_name}' finished sending: {successful_sends} contacts reached.",
+        notif_type="success" if successful_sends > 0 else "error"
+    )
+
 
 @router.post("/whatsapp/publish")
-async def publish_whatsapp_campaign(req: SmsPublishRequest):
+async def publish_whatsapp_campaign(req: SmsPublishRequest, background_tasks: BackgroundTasks):
     from database import db
     import datetime
+    from bson import ObjectId
     
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
         
+    if not req.leads:
+        return {"status": "error", "message": "No leads selected for this campaign."}
+        
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Publishing WhatsApp campaign '{req.name}' to {len(req.leads)} leads.")
+    logger.info(f"Initiating WhatsApp campaign '{req.name}' for {len(req.leads)} leads.")
     
-    try:
-        successful_sends = await _dispatch_whatsapp(
-            user_id=req.user_id,
-            leads=req.leads,
-            content=req.content,
-            image_url=req.image_url
-        )
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    session_id = f"user_{req.user_id}"
+    from services.whatsapp import openwa_service
+    status = await openwa_service.get_connection_status(session_id=session_id)
+    if status != "CONNECTED":
+        return {
+            "status": "error",
+            "message": "WhatsApp is not connected. Please go to the Integrations page and connect WhatsApp first."
+        }
+
+    campaign_id = str(ObjectId())
+    total_leads = len(req.leads)
     
     new_campaign = {
+        "_id": ObjectId(campaign_id),
+        "campaign_id": campaign_id,
         "user_id": req.user_id,
         "name": req.name,
-        "status": "Active",
+        "status": "Sending",
         "type": "WhatsApp",
-        "progress": 100,
-        "sent": successful_sends,
+        "progress": 0,
+        "sent": 0,
+        "failed": 0,
+        "total": total_leads,
         "replied": 0,
         "booked": 0,
         "date": datetime.datetime.utcnow().strftime("%b %d, %Y"),
@@ -1292,17 +1477,27 @@ async def publish_whatsapp_campaign(req: SmsPublishRequest):
         "content": req.content,
         "image_url": req.image_url,
         "action": req.action,
+        "anti_ban_mode": True,
+        "pacing": "4-7s randomized jitter + batch cooldown",
+        "dispatch_status": f"Starting safe background dispatch for {total_leads} contacts (4-7s delay)...",
         "audience": [{"name": l.get("name", ""), "contact": l.get("phone", "")} for l in req.leads]
     }
     
     await db.campaigns.insert_one(new_campaign)
     
-    from services.notifications import create_notification
-    await create_notification(
+    # Launch in background so HTTP response is instantaneous and never times out
+    background_tasks.add_task(
+        _background_dispatch_whatsapp,
         user_id=req.user_id,
-        title="WhatsApp Campaign Completed",
-        message=f"WhatsApp campaign '{req.name}' successfully sent to {successful_sends} contacts.",
-        notif_type="success"
+        campaign_id=campaign_id,
+        leads=req.leads,
+        content=req.content,
+        image_url=req.image_url,
+        campaign_name=req.name
     )
     
-    return {"status": "success", "message": f"Successfully published and sent WhatsApp campaign to {successful_sends} contacts!"}
+    return {
+        "status": "success",
+        "campaign_id": campaign_id,
+        "message": f"Campaign '{req.name}' started in background! Anti-ban safe pacing active (4-7s delay) to protect your WhatsApp account."
+    }

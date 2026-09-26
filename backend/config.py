@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     REACHER_API_URL: str = os.getenv("REACHER_API_URL", "http://localhost:8080")
     
     # WhatsApp (Evolution API) Config
-    EVOLUTION_API_URL: str = os.getenv("EVOLUTION_API_URL", "http://localhost:8082")
+    EVOLUTION_API_URL: str = os.getenv("EVOLUTION_API_URL", "https://evolution-api.livelysmoke-eb748d53.centralindia.azurecontainerapps.io")
     EVOLUTION_API_KEY: str = os.getenv("EVOLUTION_API_KEY", "gtm_super_secret_global_key")
     
     # Server Config

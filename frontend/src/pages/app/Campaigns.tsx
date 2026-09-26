@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, MoreVertical, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles, Trash2 } from 'lucide-react';
+import { Plus, MoreVertical, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../utils/api';
 
@@ -47,6 +47,142 @@ export default function Campaigns() {
   const [selectedLeadPhones, setSelectedLeadPhones] = useState<Set<string>>(new Set());
   const [smsLogs, setSmsLogs] = useState<any[]>([]);
 
+  // Integration-aware safety helpers
+  const connectedEmail = user?.integrations?.gmail?.email || user?.integrations?.smtp?.email || null;
+  const isPersonalGmail = connectedEmail ? connectedEmail.toLowerCase().endsWith('@gmail.com') : false;
+  const isEmailConnected = !!(user?.integrations?.gmail || user?.integrations?.smtp);
+
+  const renderDeliverabilityAdvisor = (channel: string, count: number) => {
+    if (channel === 'email') {
+      if (!isEmailConnected) {
+        return (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start gap-2.5 mt-3 mb-4">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-amber-900">No Email Integration Detected</p>
+              <p className="mt-0.5 text-amber-700">
+                You have not connected an email account yet. Please connect Google Workspace or SMTP in{' '}
+                <a href="/app/integrations" className="underline font-semibold text-amber-900 hover:text-amber-950">Integrations</a> before publishing.
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      if (isPersonalGmail) {
+        const isOverLimit = count > 50;
+        return (
+          <div className={`rounded-lg p-3 text-xs border flex items-start gap-2.5 mt-3 mb-4 ${
+            isOverLimit ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'
+          }`}>
+            {isOverLimit ? <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" /> : <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-gray-900">Personal Gmail Sender:</span>
+                <span className="font-mono text-[11px] bg-white px-1.5 py-0.5 rounded border border-gray-200">{connectedEmail}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                  isOverLimit ? 'bg-red-200 text-red-900' : 'bg-blue-200 text-blue-900'
+                }`}>
+                  {count} / 50 Daily Safe Cap
+                </span>
+              </div>
+              <p className="mt-1 text-gray-700 leading-relaxed">
+                {isOverLimit ? (
+                  <span className="text-red-700 font-medium">
+                    ⚠️ <strong>Spam Penalty Risk:</strong> You selected {count} recipients. Google's automated spam filters frequently restrict personal @gmail.com accounts sending &gt;50 cold emails per day. We strongly suggest capping this batch at ≤50 or upgrading to Google Workspace.
+                  </span>
+                ) : (
+                  <span>
+                    💡 <strong>Optimal Volume:</strong> Personal Gmail accounts perform best under 50 cold emails/day. Keep the "Only send to Verified Emails" box checked to ensure low bounce rates.
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+        );
+      } else {
+        // Domain / Workspace / SMTP
+        const isOverLimit = count > 150;
+        return (
+          <div className={`rounded-lg p-3 text-xs border flex items-start gap-2.5 mt-3 mb-4 ${
+            isOverLimit ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          }`}>
+            {isOverLimit ? <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" /> : <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-gray-900">Custom Domain / Workspace:</span>
+                <span className="font-mono text-[11px] bg-white px-1.5 py-0.5 rounded border border-gray-200">{connectedEmail || "Configured"}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                  isOverLimit ? 'bg-amber-200 text-amber-900' : 'bg-emerald-200 text-emerald-900'
+                }`}>
+                  {count} / 150 Recommended
+                </span>
+              </div>
+              <p className="mt-1 text-gray-700 leading-relaxed">
+                {isOverLimit ? (
+                  <span className="text-amber-800 font-medium">
+                    ⚠️ <strong>Deliverability Advisory:</strong> You selected {count} recipients. To maintain pristine sender reputation and avoid landing in spam/junk folders, the industry standard cap is 100–150 cold emails per day per inbox.
+                  </span>
+                ) : (
+                  <span>
+                    ✅ <strong>Safe Outreach Pace:</strong> {count} emails is within the healthy threshold for single-inbox outreach. Always maintain SPF, DKIM, and DMARC on your domain.
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+        );
+      }
+    }
+
+    if (channel === 'whatsapp') {
+      const isHighRisk = count > 250;
+      const isModerate = count > 150 && count <= 250;
+
+      return (
+        <div className={`rounded-lg p-3 text-xs border flex items-start gap-2.5 mt-3 mb-4 ${
+          isHighRisk ? 'bg-red-50 border-red-200 text-red-800' : isModerate ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+        }`}>
+          {isHighRisk ? (
+            <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+          ) : isModerate ? (
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          ) : (
+            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          )}
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-gray-900">WhatsApp Anti-Ban Protection:</span>
+              <span className="bg-white px-2 py-0.5 rounded border border-gray-200 font-mono text-[11px] text-gray-700">4-7s Safe Jitter</span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                isHighRisk ? 'bg-red-200 text-red-900' : isModerate ? 'bg-amber-200 text-amber-900' : 'bg-emerald-200 text-emerald-900'
+              }`}>
+                {count} / 200 Daily Target
+              </span>
+            </div>
+            <p className="mt-1 text-gray-700 leading-relaxed">
+              {isHighRisk ? (
+                <span className="text-red-700 font-medium">
+                  🚨 <strong>High Suspension Risk:</strong> Sending &gt;250 messages to unsaved numbers in 24 hours has a high probability of temporary WhatsApp bans. We strongly advise splitting this campaign into smaller daily batches.
+                </span>
+              ) : isModerate ? (
+                <span className="text-amber-800 font-medium">
+                  ⚠️ <strong>Moderate Volume ({count} contacts):</strong> Safe for established numbers (&gt;1 month old with regular 2-way chat history). For fresh SIM cards (&lt;30 days old), stay below 100/day.
+                </span>
+              ) : (
+                <span>
+                  ✅ <strong>Safe Volume ({count} contacts):</strong> Within the safe threshold for automated outreach. Anti-ban safe jitter (4.0s–7.5s delays) and batch cooldowns will execute automatically in the background.
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   const fetchCampaigns = async () => {
     try {
       const userId = user?.user_id || 'user_12345_john_doe';
@@ -54,7 +190,7 @@ export default function Campaigns() {
       if (Array.isArray(data)) {
         const mappedData = data.map((c: any) => ({
           ...c,
-          icon: c.type === 'LinkedIn' ? Share2 : c.type === 'Voice' ? PhoneCall : c.type === 'SMS' ? MessageCircle : Mail
+          icon: c.type === 'LinkedIn' ? Share2 : c.type === 'Voice' ? PhoneCall : (c.type === 'SMS' || c.type === 'WhatsApp') ? MessageCircle : Mail
         }));
         setCampaignsList(mappedData);
       }
@@ -80,9 +216,21 @@ export default function Campaigns() {
     fetchCampaigns();
   }, []);
 
+  // Poll continuously while any campaign is actively Sending in the background
+  useEffect(() => {
+    const hasSending = campaignsList.some(c => c.status === 'Sending');
+    if (!hasSending) return;
+
+    const interval = setInterval(() => {
+      fetchCampaigns();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [campaignsList]);
+
   const displayedCampaigns = campaignsList.filter(c => {
     if (activeTab === 'All') return true;
-    if (activeTab === 'Active') return c.status === 'Active';
+    if (activeTab === 'Active') return c.status === 'Active' || c.status === 'Sending';
     if (activeTab === 'Paused') return c.status === 'Paused';
     if (activeTab === 'Drafts') return c.status === 'Draft';
     return true;
@@ -91,7 +239,7 @@ export default function Campaigns() {
   useEffect(() => {
     if (viewingCampaign) {
       const type = viewingCampaign.type?.toLowerCase();
-      if (['email', 'sms', 'call', 'voice'].includes(type)) {
+      if (['email', 'sms', 'call', 'voice', 'whatsapp'].includes(type)) {
         fetchLeads();
       }
       if (type === 'sms' && viewingCampaign.status === 'Active') {
@@ -210,13 +358,14 @@ export default function Campaigns() {
     try {
       const activeType = viewingCampaign.type?.toLowerCase();
       const isSms = activeType === 'sms';
+      const isWhatsApp = activeType === 'whatsapp';
       const isVoice = activeType === 'voice' || activeType === 'call';
 
       // Collect leads
       let collectedLeads: any[] = [];
       industryGroups.forEach(g => {
         g.leads.forEach((l: any) => {
-          if (isSms || isVoice) {
+          if (isSms || isVoice || isWhatsApp) {
             if (l.phone && selectedLeadPhones.has(l.phone)) {
               collectedLeads.push(l);
             }
@@ -240,7 +389,18 @@ export default function Campaigns() {
         leads: collectedLeads.map(l => ({ name: l.name, email: l.email }))
       };
 
-      if (isSms) {
+      if (isWhatsApp) {
+        path = '/api/campaigns/whatsapp/publish';
+        payload = {
+          action: 'post',
+          content: viewingCampaign.content || "WhatsApp Content",
+          image_url: viewingCampaign.image_url || "",
+          user_id: user?.user_id || "user_12345_john_doe",
+          name: viewingCampaign.name || "WhatsApp Campaign",
+          method: "leads",
+          leads: collectedLeads.map(l => ({ name: l.name, phone: l.phone }))
+        };
+      } else if (isSms) {
         path = '/api/campaigns/sms/publish';
         payload = {
           action: 'post',
@@ -466,27 +626,38 @@ export default function Campaigns() {
           });
         });
 
-        const data = await apiFetch('/api/campaigns/sms/publish', {
+        const isWhatsApp = campaignType === 'whatsapp';
+        const endpoint = isWhatsApp ? '/api/campaigns/whatsapp/publish' : '/api/campaigns/sms/publish';
+        const defaultName = isWhatsApp ? "WhatsApp Campaign" : "SMS Campaign";
+
+        const data = await apiFetch(endpoint, {
           method: 'POST',
           bodyData: {
             action,
             content: generatedContent,
             image_url: imageUrl,
             user_id: user?.user_id || "user_12345_john_doe",
-            name: campaignName || productName || "SMS Campaign",
+            name: campaignName || productName || defaultName,
             method: "leads",
             leads: collectedLeads.map(l => ({ name: l.name, phone: l.phone }))
           }
         });
         if (data.status === 'error') {
-          if (data.message && data.message.includes('Twilio')) {
+          if (!isWhatsApp && data.message && data.message.includes('Twilio')) {
             if (window.confirm(data.message + "\n\nWould you like to go to the Integrations page to connect it now?")) {
+              window.location.href = '/app/integrations';
+              return;
+            }
+          } else if (isWhatsApp && data.message && data.message.toLowerCase().includes('whatsapp')) {
+            if (window.confirm(data.message + "\n\nWould you like to go to the Integrations page to verify your WhatsApp connection?")) {
               window.location.href = '/app/integrations';
               return;
             }
           } else {
             alert("Error: " + data.message);
           }
+          setIsPublishing(false);
+          return;
         } else {
           alert(data.message);
         }
@@ -674,35 +845,74 @@ export default function Campaigns() {
             {/* Info */}
             <div className="flex items-center gap-4 flex-1 w-full">
               <div className="w-12 h-12 rounded-xl bg-[#FDF8F5] border border-[#F2DED6] flex items-center justify-center shrink-0">
-                <campaign.icon className="w-6 h-6 text-gray-400" />
+                <campaign.icon className="w-6 h-6 text-gray-500" />
               </div>
-              <div>
-                <h3 className="text-base font-semibold text-gray-900 mb-1">{campaign.name}</h3>
-                <div className="flex items-center gap-3 text-xs text-gray-500">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <h3 className="text-base font-semibold text-gray-900 truncate">{campaign.name}</h3>
+                  {campaign.type === 'WhatsApp' && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+                      <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                      Anti-Ban Paced
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
                   <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {campaign.date}</span>
                   <span className="w-1 h-1 rounded-full bg-gray-300"></span>
                   <span>{campaign.type} Campaign</span>
+                  {campaign.status === 'Sending' && (
+                    <>
+                      <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+                      <span className="text-blue-600 font-medium flex items-center gap-1 animate-pulse">
+                        <Loader2 className="w-3 h-3 animate-spin" /> In Progress (Background)
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* Status & Progress */}
-            <div className="w-full md:w-48">
+            <div className="w-full md:w-56">
               <div className="flex justify-between items-end mb-2">
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${campaign.status === 'Active' ? 'bg-green-100 text-green-700 border border-green-200' :
-                  campaign.status === 'Paused' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
-                    'bg-gray-100 text-gray-600 border border-gray-200'
-                  }`}>
-                  {campaign.status}
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  campaign.status === 'Sending'
+                    ? 'bg-blue-100 text-blue-700 border border-blue-200 flex items-center gap-1 font-semibold animate-pulse'
+                    : campaign.status === 'Active'
+                      ? 'bg-green-100 text-green-700 border border-green-200'
+                      : campaign.status === 'Paused'
+                        ? 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+                        : 'bg-gray-100 text-gray-600 border border-gray-200'
+                }`}>
+                  {campaign.status === 'Sending' ? (
+                    <>
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                      Sending ({campaign.sent}/{campaign.total || (campaign.audience?.length) || '...'})
+                    </>
+                  ) : (
+                    campaign.status
+                  )}
                 </span>
-                <span className="text-xs text-gray-500 font-medium">{campaign.progress}%</span>
+                <span className="text-xs text-gray-500 font-medium">{campaign.progress || 0}%</span>
               </div>
-              <div className="w-full bg-gray-100 rounded-full h-1.5 border border-gray-200">
+              <div className="w-full bg-gray-100 rounded-full h-2 border border-gray-200 overflow-hidden">
                 <div
-                  className={`h-1.5 rounded-full ${campaign.status === 'Active' ? 'bg-primary' : 'bg-gray-400'}`}
-                  style={{ width: `${campaign.progress}%` }}
+                  className={`h-2 rounded-full transition-all duration-500 ${
+                    campaign.status === 'Sending'
+                      ? 'bg-gradient-to-r from-blue-500 to-indigo-600 animate-pulse'
+                      : campaign.status === 'Active'
+                        ? 'bg-primary'
+                        : 'bg-gray-400'
+                  }`}
+                  style={{ width: `${Math.max(campaign.progress || 0, campaign.status === 'Sending' ? 8 : 0)}%` }}
                 ></div>
               </div>
+              {campaign.dispatch_status && (
+                <p className="text-[11px] text-gray-500 mt-1 truncate max-w-full font-mono" title={campaign.dispatch_status}>
+                  {campaign.dispatch_status}
+                </p>
+              )}
             </div>
 
             {/* Metrics */}
@@ -1187,6 +1397,12 @@ export default function Campaigns() {
                           </div>
                         )}
 
+                        {/* Dynamic Deliverability & Safe Pacing Advisor */}
+                        {['email', 'whatsapp'].includes(campaignType) && renderDeliverabilityAdvisor(
+                          campaignType,
+                          campaignType === 'email' ? selectedLeadEmails.size : selectedLeadPhones.size
+                        )}
+
                         <div className="flex gap-4">
                           <button
                             onClick={handleSaveDraft}
@@ -1285,6 +1501,33 @@ export default function Campaigns() {
             </div>
 
             <div className="p-6 space-y-6 overflow-y-auto flex-1">
+              {/* WhatsApp Anti-Ban & Delivery Banner */}
+              {viewingCampaign.type === 'WhatsApp' && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg shrink-0 mt-0.5">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-emerald-900 flex items-center gap-2">
+                        WhatsApp Anti-Ban Safe Pacing Engine
+                        <span className="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full font-bold">ACTIVE</span>
+                      </h4>
+                      <p className="text-xs text-emerald-700 mt-0.5">
+                        {viewingCampaign.dispatch_status || "4-7s randomized jitter delays and cooldown intervals protect your phone number from spam flags."}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => window.location.href = '/app/whatsapp-logs'}
+                    className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    Live WhatsApp Logs →
+                  </button>
+                </div>
+              )}
+
               {/* Campaign Content */}
               <div>
                 <h3 className="text-sm font-semibold text-gray-900 mb-2">Campaign Content</h3>
@@ -1369,11 +1612,11 @@ export default function Campaigns() {
                               {(group.leads || [])
                                 .filter((l: any) => {
                                   const t = viewingCampaign.type?.toLowerCase();
-                                  return (t === 'sms' || t === 'call' || t === 'voice') ? l.phone : l.email;
+                                  return (t === 'sms' || t === 'call' || t === 'voice' || t === 'whatsapp') ? l.phone : l.email;
                                 })
                                 .map((lead: any, i: number) => {
                                   const t = viewingCampaign.type?.toLowerCase();
-                                  const isSmsOrCall = (t === 'sms' || t === 'call' || t === 'voice');
+                                  const isSmsOrCall = (t === 'sms' || t === 'call' || t === 'voice' || t === 'whatsapp');
                                   const isSelected = isSmsOrCall ? selectedLeadPhones.has(lead.phone) : selectedLeadEmails.has(lead.email);
                                   const isDisabled = !isSmsOrCall && onlyVerifiedEmails && !lead.is_verified;
 
@@ -1410,10 +1653,17 @@ export default function Campaigns() {
                       ))
                     )}
                   </div>
+
+                  {/* Dynamic Deliverability & Safe Pacing Advisor */}
+                  {['email', 'whatsapp'].includes(viewingCampaign.type?.toLowerCase()) && renderDeliverabilityAdvisor(
+                    viewingCampaign.type?.toLowerCase(),
+                    viewingCampaign.type?.toLowerCase() === 'email' ? selectedLeadEmails.size : selectedLeadPhones.size
+                  )}
+
                   <div className="mt-6">
                     <button
                       onClick={handleSendExistingCampaign}
-                      disabled={isSendingEmail || (viewingCampaign.type?.toLowerCase() === 'sms' || viewingCampaign.type?.toLowerCase() === 'voice' || viewingCampaign.type?.toLowerCase() === 'call' ? selectedLeadPhones.size === 0 : selectedLeadEmails.size === 0)}
+                      disabled={isSendingEmail || (['sms', 'voice', 'call', 'whatsapp'].includes(viewingCampaign.type?.toLowerCase()) ? selectedLeadPhones.size === 0 : selectedLeadEmails.size === 0)}
                       className="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
                     >
                       {isSendingEmail ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}

@@ -14,5 +14,7 @@ build/
 _IGNORE_session/
 *.postman_collection.json
 *.sw_col.json
+*.docx
+*.pdf
 
 

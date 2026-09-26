@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Search, CheckCircle2, Settings, Link2, ExternalLink, X, Loader2 } from 'lucide-react';
+import { Search, CheckCircle2, Settings, Link2, X, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../utils/api';
 
 const initialIntegrations = [
-  { id: 'twilio', name: 'Twilio', category: 'Communications', desc: 'SMS and Voice infrastructure', status: 'connected', logo: 'https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg' },
+  { id: 'twilio', name: 'Twilio', category: 'Communications', desc: 'SMS and Voice infrastructure', status: 'available', logo: 'https://www.vectorlogo.zone/logos/twilio/twilio-icon.svg' },
   { id: 'linkedin', name: 'LinkedIn', category: 'Channels', desc: 'Automate LinkedIn outreach', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png' },
   { id: 'gmail', name: 'Google Workspace / Gmail', category: 'Channels', desc: 'Send and receive emails', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg' },
   { id: 'outlook', name: 'Microsoft Outlook', category: 'Channels', desc: 'Connect your Office 365 / Outlook account', status: 'available', logo: 'https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg' },
@@ -13,41 +13,59 @@ const initialIntegrations = [
 ];
 
 export default function Integrations() {
-  const { user } = useAuth();
+  const { user, checkSession } = useAuth();
   const [integrations, setIntegrations] = useState(initialIntegrations);
   const [showEmailModal, setShowEmailModal] = useState<string | null>(null);
   const [emailForm, setEmailForm] = useState({ host: '', port: '', email: '', password: '' });
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [showTwilioModal, setShowTwilioModal] = useState(false);
   const [twilioForm, setTwilioForm] = useState({ account_sid: '', auth_token: '', from_number: '' });
   const [isConnecting, setIsConnecting] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showWaModal, setShowWaModal] = useState(false);
   const [waQrData, setWaQrData] = useState<{session_id: string, qr_code?: string} | null>(null);
   const [isWaLoading, setIsWaLoading] = useState(false);
 
+  // 1. Handle OAuth redirects & clear query string so sticky success/error params don't persist
   useEffect(() => {
-    if (user && user.integrations) {
-      const userIntegrations = user.integrations;
-      setIntegrations(prev => prev.map(int => {
-        if (userIntegrations[int.id]) {
-          return { ...int, status: 'connected' };
-        }
-        return int;
-      }));
-    }
-
-    // Check if we just returned from LinkedIn or Gmail auth
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('success') === 'linkedin_connected') {
-      setIntegrations(prev => prev.map(int => 
-        int.id === 'linkedin' ? { ...int, status: 'connected' } : int
-      ));
+    const success = urlParams.get('success');
+    const error = urlParams.get('error');
+
+    if (success) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      checkSession();
+    } else if (error) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      alert(`Integration error: ${error}`);
     }
-    if (urlParams.get('success') === 'gmail_connected') {
-      setIntegrations(prev => prev.map(int => 
-        int.id === 'gmail' ? { ...int, status: 'connected' } : int
-      ));
+  }, []);
+
+  // 2. Synchronize integration cards accurately with user.integrations from MongoDB & live checks
+  useEffect(() => {
+    const userIntegrations = user?.integrations || {};
+    setIntegrations(initialIntegrations.map(int => {
+      const isConnected = !!userIntegrations[int.id];
+      return {
+        ...int,
+        status: isConnected ? 'connected' : 'available'
+      };
+    }));
+
+    // Auto-verify live WhatsApp status if user session exists
+    if (user?.user_id) {
+      apiFetch(`/api/whatsapp/status/user_${user.user_id}`)
+        .then(res => {
+          if (res?.connection_state === 'CONNECTED') {
+            setIntegrations(prev => prev.map(int => int.id === 'whatsapp' ? { ...int, status: 'connected' } : int));
+          } else if (res?.connection_state === 'DISCONNECTED') {
+            setIntegrations(prev => prev.map(int => int.id === 'whatsapp' ? { ...int, status: 'available' } : int));
+          }
+        })
+        .catch(() => {});
     }
   }, [user]);
 
@@ -85,6 +103,7 @@ export default function Integrations() {
     }
 
     if (['outlook', 'smtp'].includes(id)) {
+      setEmailError(null);
       setShowEmailModal(id);
       return;
     }
@@ -101,7 +120,7 @@ export default function Integrations() {
     }
 
     // Mock connection for others
-    setIntegrations(integrations.map(int => 
+    setIntegrations(prev => prev.map(int => 
       int.id === id ? { ...int, status: 'connected' } : int
     ));
     alert(`Successfully connected ${id}!`);
@@ -109,24 +128,31 @@ export default function Integrations() {
 
   const submitEmailConnect = async () => {
     setIsConnecting(true);
+    setEmailError(null);
     try {
-      await apiFetch('/api/integrations/email/connect', {
+      const data = await apiFetch('/api/integrations/email/connect', {
         method: 'POST',
         bodyData: {
           provider: showEmailModal,
-          user_id: user?.user_id || 'user_12345_john_doe',
+          user_id: user?.user_id,
           ...emailForm
         }
       });
-      setIntegrations(integrations.map(int => int.id === showEmailModal ? { ...int, status: 'connected' } : int));
-      setShowEmailModal(null);
-      setEmailForm({ host: '', port: '', email: '', password: '' });
-      alert(`Successfully connected! You can now send Email Campaigns directly from the platform.`);
+      if (data.status === 'success' || data.success) {
+        await checkSession();
+        setIntegrations(prev => prev.map(int => int.id === showEmailModal ? { ...int, status: 'connected' } : int));
+        setShowEmailModal(null);
+        setEmailForm({ host: '', port: '', email: '', password: '' });
+        alert(data.message || 'Successfully connected! Credentials verified.');
+      } else {
+        setEmailError(data.message || 'Failed to connect email provider');
+      }
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'Failed to connect email provider');
+      setEmailError(err.message || 'Verification failed. Please check host, port, email, and password.');
+    } finally {
+      setIsConnecting(false);
     }
-    setIsConnecting(false);
   };
 
   const submitTwilioConnect = async () => {
@@ -135,12 +161,13 @@ export default function Integrations() {
       const data = await apiFetch('/api/integrations/twilio/connect', {
         method: 'POST',
         bodyData: {
-          user_id: user?.user_id || 'user_12345_john_doe',
+          user_id: user?.user_id,
           ...twilioForm
         }
       });
-      if (data.success) {
-        setIntegrations(integrations.map(int => int.id === 'twilio' ? { ...int, status: 'connected' } : int));
+      if (data.status === 'success' || data.success) {
+        await checkSession();
+        setIntegrations(prev => prev.map(int => int.id === 'twilio' ? { ...int, status: 'connected' } : int));
         setShowTwilioModal(false);
         setTwilioForm({ account_sid: '', auth_token: '', from_number: '' });
         alert(`Successfully connected Twilio! You can now send SMS Campaigns.`);
@@ -150,8 +177,64 @@ export default function Integrations() {
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'Network error connecting Twilio');
+    } finally {
+      setIsConnecting(false);
     }
-    setIsConnecting(false);
+  };
+
+  const handleTestConnection = async (providerId: string) => {
+    setIsTestingConnection(true);
+    setTestResult(null);
+    try {
+      const res = await apiFetch('/api/integrations/verify', {
+        method: 'POST',
+        bodyData: {
+          provider: providerId,
+          user_id: user?.user_id
+        }
+      });
+      setTestResult({
+        success: res.success,
+        message: res.message || (res.success ? 'Connection verified!' : 'Connection check failed.')
+      });
+      if (!res.success) {
+        setIntegrations(prev => prev.map(int => int.id === providerId ? { ...int, status: 'error' } : int));
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err.message || 'Connection check failed. Server unreachable.'
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const handleDisconnect = async (providerId: string) => {
+    setIsDisconnecting(true);
+    try {
+      const data = await apiFetch('/api/integrations/disconnect', {
+        method: 'POST',
+        bodyData: { 
+          provider: providerId,
+          user_id: user?.user_id
+        }
+      });
+      if (data.status === 'success' || data.success) {
+        await checkSession();
+        setIntegrations(prev => prev.map(int => int.id === providerId ? { ...int, status: 'available' } : int));
+        setShowConfigModal(null);
+        setTestResult(null);
+        alert(`Successfully disconnected ${providerId}!`);
+      } else {
+        alert(data.message || 'Failed to disconnect');
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Network error');
+    } finally {
+      setIsDisconnecting(false);
+    }
   };
 
   const startWaSession = async () => {
@@ -162,7 +245,6 @@ export default function Integrations() {
         method: 'POST',
       });
       if (data.session_id) {
-        // data.data could contain the QR code depending on OpenWA format
         setWaQrData({
           session_id: data.session_id,
           qr_code: data.data?.qr || null 
@@ -182,15 +264,16 @@ export default function Integrations() {
       interval = setInterval(async () => {
         try {
           const data = await apiFetch(`/api/whatsapp/status/${waQrData.session_id}`);
-          if (data.connection_state === 'CONNECTED') { // Replace with actual OpenWA state
+          if (data.connection_state === 'CONNECTED') {
             setIntegrations(prev => prev.map(int => int.id === 'whatsapp' ? { ...int, status: 'connected' } : int));
             setShowWaModal(false);
+            await checkSession();
             alert('Successfully connected WhatsApp!');
           }
         } catch (e) {
           console.error(e);
         }
-      }, 5000); // Check every 5 seconds
+      }, 5000);
     }
     return () => clearInterval(interval);
   }, [showWaModal, waQrData]);
@@ -200,7 +283,7 @@ export default function Integrations() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Integrations</h1>
-          <p className="text-sm text-gray-500">Connect Genquantaa with your favorite tools and platforms.</p>
+          <p className="text-sm text-gray-500">Connect Genquantaa with your email channels, SMS providers, and external tools.</p>
         </div>
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -213,7 +296,7 @@ export default function Integrations() {
       </div>
 
       <div className="flex gap-2 pb-4 overflow-x-auto hide-scrollbar">
-        {['All', 'AI Models', 'Communications', 'Data & Enrichment', 'Channels', 'Billing'].map((category, i) => (
+        {['All', 'Channels', 'Communications'].map((category, i) => (
           <button key={i} className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors border shadow-sm ${
             i === 0 ? 'bg-primary text-white border-primary' : 'bg-white text-gray-600 border-[#F2DED6] hover:text-gray-900 hover:bg-gray-50'
           }`}>
@@ -233,6 +316,10 @@ export default function Integrations() {
                 <span className="flex items-center text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-200">
                   <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Connected
                 </span>
+              ) : integration.status === 'error' ? (
+                <span className="flex items-center text-xs font-medium text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full border border-amber-200">
+                  <AlertCircle className="w-3.5 h-3.5 mr-1" /> Needs Reconnect
+                </span>
               ) : (
                 <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full border border-gray-200">
                   Available
@@ -244,23 +331,30 @@ export default function Integrations() {
             <p className="text-sm text-gray-500 mb-6 flex-1">{integration.desc}</p>
             
             <div className="pt-4 border-t border-[#F2DED6] flex gap-2">
-              {integration.status === 'connected' ? (
+              {integration.status === 'connected' || integration.status === 'error' ? (
                 <div className="w-full space-y-2">
                   <div className="flex gap-2">
                     <button 
-                      onClick={() => setShowConfigModal(integration.id)}
+                      onClick={() => {
+                        setTestResult(null);
+                        setShowConfigModal(integration.id);
+                      }}
                       className="flex-1 flex items-center justify-center px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 border border-[#F2DED6] rounded-lg transition-colors shadow-sm">
-                      <Settings className="w-4 h-4 mr-2" /> Configure
+                      <Settings className="w-4 h-4 mr-2 text-gray-500" />
+                      {integration.status === 'error' ? 'Fix Connection' : 'Configure'}
                     </button>
-                    <button className="p-2 text-gray-500 hover:text-gray-900 bg-white hover:bg-gray-50 border border-[#F2DED6] rounded-lg transition-colors shadow-sm">
-                      <ExternalLink className="w-4 h-4" />
+                    <button 
+                      onClick={() => handleTestConnection(integration.id)}
+                      title="Quick Health Test"
+                      className="p-2 text-gray-500 hover:text-gray-900 bg-white hover:bg-gray-50 border border-[#F2DED6] rounded-lg transition-colors shadow-sm">
+                      <RefreshCw className="w-4 h-4" />
                     </button>
                   </div>
                   {integration.id === 'linkedin' && (
                     <div className="p-2 bg-gray-50 border border-gray-100 rounded-lg mt-2">
                       <p className="text-xs text-gray-500 font-mono break-all">
-                        <span className="font-semibold text-gray-700">User ID:</span> {user?.user_id || 'user_12345_john_doe'}<br />
-                        <span className="font-semibold text-gray-700">Token:</span> Valid & Active
+                        <span className="font-semibold text-gray-700">User:</span> {user?.email || user?.user_id}<br />
+                        <span className="font-semibold text-gray-700">Token:</span> Active
                       </p>
                     </div>
                   )}
@@ -275,79 +369,104 @@ export default function Integrations() {
         ))}
       </div>
 
+      {/* Email Connect Modal */}
       {showEmailModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6">
-            <h2 className="text-xl font-bold mb-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+            <h2 className="text-xl font-bold mb-1 text-gray-900">
               Connect {integrations.find(i => i.id === showEmailModal)?.name}
             </h2>
+            <p className="text-xs text-gray-500 mb-4">Credentials will be validated immediately before saving to ensure active deliverability.</p>
+            
+            {emailError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                <div className="flex-1">{emailError}</div>
+              </div>
+            )}
+
             <div className="space-y-4">
               {showEmailModal === 'smtp' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium mb-1">SMTP Host</label>
-                    <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={emailForm.host} onChange={e => setEmailForm({...emailForm, host: e.target.value})} placeholder="smtp.example.com" />
+                    <label className="block text-sm font-medium mb-1 text-gray-700">SMTP Host</label>
+                    <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-primary" value={emailForm.host} onChange={e => setEmailForm({...emailForm, host: e.target.value})} placeholder="smtp.example.com" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">SMTP Port</label>
-                    <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={emailForm.port} onChange={e => setEmailForm({...emailForm, port: e.target.value})} placeholder="587" />
+                    <label className="block text-sm font-medium mb-1 text-gray-700">SMTP Port</label>
+                    <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-primary" value={emailForm.port} onChange={e => setEmailForm({...emailForm, port: e.target.value})} placeholder="587" />
                   </div>
                 </>
               )}
               <div>
-                <label className="block text-sm font-medium mb-1">Email Address</label>
-                <input type="email" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={emailForm.email} onChange={e => setEmailForm({...emailForm, email: e.target.value})} placeholder="you@example.com" />
+                <label className="block text-sm font-medium mb-1 text-gray-700">Email Address</label>
+                <input type="email" className="w-full border border-[#F2DED6] rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-primary" value={emailForm.email} onChange={e => setEmailForm({...emailForm, email: e.target.value})} placeholder="you@example.com" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">App Password / Password</label>
-                <input type="password" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={emailForm.password} onChange={e => setEmailForm({...emailForm, password: e.target.value})} placeholder="Enter your secure password" />
-                {showEmailModal !== 'smtp' && (
-                  <p className="text-xs text-gray-500 mt-2">For enhanced security, we recommend using an App Password generated from your provider's security settings rather than your primary account password.</p>
-                )}
+                <label className="block text-sm font-medium mb-1 text-gray-700">App Password / Password</label>
+                <input type="password" className="w-full border border-[#F2DED6] rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-primary" value={emailForm.password} onChange={e => setEmailForm({...emailForm, password: e.target.value})} placeholder="Enter secure app password" />
+                <p className="text-xs text-gray-500 mt-2">
+                  {showEmailModal === 'outlook' 
+                    ? "For Microsoft 365 / Outlook, please generate an App Password or ensure SMTP AUTH is permitted for this account."
+                    : "For Gmail/Google accounts, you must use a 16-character App Password (myaccount.google.com/apppasswords), or use the Google Workspace button to authenticate with OAuth."
+                  }
+                </p>
               </div>
             </div>
             <div className="mt-6 flex gap-3 justify-end">
-              <button onClick={() => setShowEmailModal(null)} className="px-4 py-2 border border-[#F2DED6] hover:bg-gray-50 rounded-lg text-gray-600 font-medium transition-colors">Cancel</button>
-              <button onClick={submitEmailConnect} disabled={isConnecting || !emailForm.email || !emailForm.password} className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg flex items-center gap-2 font-medium disabled:opacity-50 transition-colors">
-                 {isConnecting ? 'Connecting...' : 'Connect Account'}
+              <button onClick={() => { setShowEmailModal(null); setEmailError(null); }} className="px-4 py-2 border border-[#F2DED6] hover:bg-gray-50 rounded-lg text-gray-600 font-medium transition-colors">Cancel</button>
+              <button onClick={submitEmailConnect} disabled={isConnecting || !emailForm.email || !emailForm.password} className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg flex items-center gap-2 font-medium disabled:opacity-50 transition-colors shadow-sm">
+                 {isConnecting ? (
+                   <>
+                     <Loader2 className="w-4 h-4 animate-spin" />
+                     Verifying & Connecting...
+                   </>
+                 ) : 'Verify & Connect Account'}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Twilio Connect Modal */}
       {showTwilioModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6">
-            <h2 className="text-xl font-bold mb-4">Connect Twilio</h2>
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
+            <h2 className="text-xl font-bold mb-4 text-gray-900">Connect Twilio</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Account SID</label>
-                <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.account_sid} onChange={e => setTwilioForm({...twilioForm, account_sid: e.target.value})} placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" />
+                <label className="block text-sm font-medium mb-1 text-gray-700">Account SID</label>
+                <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-primary font-mono" value={twilioForm.account_sid} onChange={e => setTwilioForm({...twilioForm, account_sid: e.target.value})} placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Auth Token</label>
-                <input type="password" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.auth_token} onChange={e => setTwilioForm({...twilioForm, auth_token: e.target.value})} placeholder="your_auth_token" />
+                <label className="block text-sm font-medium mb-1 text-gray-700">Auth Token</label>
+                <input type="password" className="w-full border border-[#F2DED6] rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-primary font-mono" value={twilioForm.auth_token} onChange={e => setTwilioForm({...twilioForm, auth_token: e.target.value})} placeholder="your_auth_token" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">From Phone Number</label>
-                <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 outline-none focus:ring-1 focus:ring-primary" value={twilioForm.from_number} onChange={e => setTwilioForm({...twilioForm, from_number: e.target.value})} placeholder="+1234567890" />
+                <label className="block text-sm font-medium mb-1 text-gray-700">From Phone Number</label>
+                <input type="text" className="w-full border border-[#F2DED6] rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-primary font-mono" value={twilioForm.from_number} onChange={e => setTwilioForm({...twilioForm, from_number: e.target.value})} placeholder="+1234567890" />
                 <p className="text-xs text-gray-500 mt-2">Enter your Twilio phone number in E.164 format (e.g., +1234567890).</p>
               </div>
             </div>
             <div className="mt-6 flex gap-3 justify-end">
               <button onClick={() => setShowTwilioModal(false)} className="px-4 py-2 border border-[#F2DED6] hover:bg-gray-50 rounded-lg text-gray-600 font-medium transition-colors">Cancel</button>
-              <button onClick={submitTwilioConnect} disabled={isConnecting || !twilioForm.account_sid || !twilioForm.auth_token || !twilioForm.from_number} className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg flex items-center gap-2 font-medium disabled:opacity-50 transition-colors">
-                 {isConnecting ? 'Connecting...' : 'Connect Account'}
+              <button onClick={submitTwilioConnect} disabled={isConnecting || !twilioForm.account_sid || !twilioForm.auth_token || !twilioForm.from_number} className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg flex items-center gap-2 font-medium disabled:opacity-50 transition-colors shadow-sm">
+                 {isConnecting ? (
+                   <>
+                     <Loader2 className="w-4 h-4 animate-spin" />
+                     Saving...
+                   </>
+                 ) : 'Connect Account'}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* WhatsApp Modal */}
       {showWaModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 text-center">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 text-center shadow-2xl">
             <h2 className="text-xl font-bold mb-4">Connect WhatsApp</h2>
             <p className="text-sm text-gray-500 mb-6">Scan the QR code below with your WhatsApp mobile app to connect your account.</p>
             
@@ -374,41 +493,81 @@ export default function Integrations() {
         </div>
       )}
       
-      {/* Configuration Modal */}
+      {/* Configuration & Diagnostic Modal */}
       {showConfigModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden relative">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
             <button 
-              onClick={() => setShowConfigModal(null)}
+              onClick={() => {
+                setShowConfigModal(null);
+                setTestResult(null);
+              }}
               className="absolute right-4 top-4 text-gray-400 hover:text-gray-600 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
             
             <div className="p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
                 <Settings className="w-5 h-5 text-primary" />
-                Configure Connection
+                Configure {integrations.find(i => i.id === showConfigModal)?.name}
               </h2>
               
               <div className="space-y-4 mb-6">
                 <div className="p-4 bg-[#FAF9F6] border border-[#F2DED6] rounded-xl flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">Connected Account</p>
-                    <p className="text-sm text-gray-500 font-mono mt-1 truncate max-w-[200px]">
-                      {user?.integrations?.[showConfigModal]?.email || user?.integrations?.[showConfigModal]?.from_number || 'Connected via OAuth'}
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Connected Account</p>
+                    <p className="text-sm text-gray-800 font-medium font-mono mt-1 truncate max-w-[200px]">
+                      {user?.integrations?.[showConfigModal]?.email || user?.integrations?.[showConfigModal]?.from_number || (showConfigModal === 'whatsapp' ? 'WhatsApp Paired' : 'OAuth Account')}
                     </p>
                   </div>
                   <span className="flex items-center text-xs font-medium text-green-700 bg-green-100 px-2.5 py-1 rounded-full border border-green-200">
                     <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Active
                   </span>
                 </div>
+
                 {showConfigModal === 'twilio' && (
                   <div className="p-4 bg-[#FAF9F6] border border-[#F2DED6] rounded-xl text-sm text-gray-700 space-y-2 font-mono">
                     <p><span className="font-semibold">Account SID:</span> {user?.integrations?.twilio?.account_sid}</p>
-                    <p><span className="font-semibold">Auth Token:</span> ••••••••</p>
+                    <p><span className="font-semibold">From Number:</span> {user?.integrations?.twilio?.from_number}</p>
                   </div>
                 )}
+
+                {/* Live Test Connection Card */}
+                <div className="p-4 bg-white border border-gray-200 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Health & Delivery Test</p>
+                      <p className="text-xs text-gray-500">Verify your credentials and connection with provider.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleTestConnection(showConfigModal)}
+                      disabled={isTestingConnection}
+                      className="px-3 py-1.5 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isTestingConnection ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      Test Live
+                    </button>
+                  </div>
+
+                  {testResult && (
+                    <div className={`p-3 rounded-lg text-xs flex items-start gap-2 border ${
+                      testResult.success 
+                        ? 'bg-green-50 text-green-800 border-green-200' 
+                        : 'bg-red-50 text-red-800 border-red-200'
+                    }`}>
+                      {testResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                      )}
+                      <div className="flex-1 leading-relaxed">
+                        <span className="font-semibold">{testResult.success ? 'Verified:' : 'Error:'}</span> {testResult.message}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
@@ -431,36 +590,17 @@ export default function Integrations() {
                 )}
                 <button
                   type="button"
-                  onClick={() => setShowConfigModal(null)}
+                  onClick={() => {
+                    setShowConfigModal(null);
+                    setTestResult(null);
+                  }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
                 >
                   Close
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
-                    setIsDisconnecting(true);
-                    try {
-                      const data = await apiFetch('/api/integrations/disconnect', {
-                        method: 'POST',
-                        bodyData: { 
-                          provider: showConfigModal,
-                          user_id: user?.user_id || 'user_12345_john_doe'
-                        }
-                      });
-                      if (data.success) {
-                        setIntegrations(integrations.map(int => int.id === showConfigModal ? { ...int, status: 'available' } : int));
-                        setShowConfigModal(null);
-                        alert(`Successfully disconnected!`);
-                      } else {
-                        alert(data.message || 'Failed to disconnect');
-                      }
-                    } catch (err: any) {
-                      console.error(err);
-                      alert(err.message || 'Network error');
-                    }
-                    setIsDisconnecting(false);
-                  }}
+                  onClick={() => handleDisconnect(showConfigModal)}
                   disabled={isDisconnecting}
                   className="flex items-center px-4 py-2 text-sm font-bold text-white bg-red-600 rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50"
                 >

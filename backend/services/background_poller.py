@@ -39,7 +39,7 @@ async def background_email_poller():
                         email_provider = provider
                         break
                         
-                if not email_creds or not email_creds.get("email"):
+                if not email_creds or not email_creds.get("email") or email_creds.get("auth_error"):
                     continue
                     
                 logger.info(f"Background syncing emails for user {user_id} via {email_provider}")
@@ -51,8 +51,10 @@ async def background_email_poller():
                         refresh_token = email_creds.get("refresh_token")
                         
                         if time.time() >= expires_at - 60:
-                            if refresh_token:
-                                logger.info(f"Background poller refreshing Google token for {user_id}")
+                            if not refresh_token:
+                                continue
+                            logger.info(f"Background poller refreshing Google token for {user_id}")
+                            try:
                                 refreshed = await refresh_gmail_token(refresh_token)
                                 access_token = refreshed["access_token"]
                                 expires_at = time.time() + refreshed["expires_in"]
@@ -60,9 +62,21 @@ async def background_email_poller():
                                     {"user_id": user_id},
                                     {"$set": {
                                         "integrations.gmail.access_token": access_token,
-                                        "integrations.gmail.expires_at": expires_at
+                                        "integrations.gmail.expires_at": expires_at,
+                                        "integrations.gmail.auth_error": False
                                     }}
                                 )
+                            except Exception as refresh_err:
+                                logger.warning(f"Google token refresh failed for user {user_id}: {refresh_err}")
+                                if "invalid_grant" in str(refresh_err).lower():
+                                    await db.users.update_one(
+                                        {"user_id": user_id},
+                                        {"$set": {
+                                            "integrations.gmail.auth_error": True,
+                                            "integrations.gmail.error_message": "Google authorization expired or revoked. Please reconnect."
+                                        }}
+                                    )
+                                continue
                         
                         emails = await fetch_emails_via_gmail_api(access_token, folder="inbox")
                         new_replies = await _process_incoming_emails(emails, user_id)

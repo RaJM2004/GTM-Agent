@@ -50,7 +50,7 @@ export default function Inbox() {
           setSelectedThread(null);
         }
       } else {
-        setConnected(true); // Visually they attached, but fetching failed
+        setConnected(res.connected === true);
         setError(res.message || 'Credentials/Verification failed');
         setThreads([]);
         setSelectedThread(null);
@@ -297,7 +297,7 @@ export default function Inbox() {
                         <span className="text-xs text-gray-500">{selectedThread.time}</span>
                       </div>
                       <div
-                        className="text-sm text-gray-700 leading-relaxed font-sans prose prose-sm max-w-none"
+                        className="text-sm text-gray-700 leading-relaxed font-sans prose prose-sm max-w-none whitespace-pre-wrap break-words"
                         dangerouslySetInnerHTML={{ __html: selectedThread.body || selectedThread.preview }}
                       />
                     </div>

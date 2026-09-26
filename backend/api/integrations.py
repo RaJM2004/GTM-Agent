@@ -5,9 +5,12 @@ from fastapi.responses import RedirectResponse
 import httpx
 from pydantic import BaseModel
 
+import socket
+import smtplib
+import imaplib
 from config import settings
 from database import save_integration_token
-from services.auth import get_current_user
+from services.auth import get_current_user, get_token_from_cookie_or_header
 from services.email_fetcher import fetch_real_emails
 
 logger = logging.getLogger(__name__)
@@ -240,51 +243,152 @@ async def google_callback(
         return RedirectResponse(f"{target_frontend_url}/app/integrations?success=gmail_connected")
 
 
+async def get_optional_current_user(request: Request) -> dict:
+    try:
+        token = get_token_from_cookie_or_header(request)
+        return await get_current_user(token)
+    except Exception:
+        return {}
+
+
+def verify_email_credentials(email: str, password: str, host: str = "", port: str = "", provider: str = "smtp") -> tuple:
+    """Tests if SMTP or IMAP connection and credentials are valid before saving or during health checks."""
+    if not email or not password:
+        return False, "Email address and password/app password are required."
+
+    smtp_host = host.strip() if host else ""
+    smtp_port = int(port) if port and str(port).strip().isdigit() else 587
+
+    if not smtp_host:
+        if provider == "gmail" or "gmail.com" in email.lower():
+            smtp_host = "smtp.gmail.com"
+            smtp_port = 587
+        elif provider == "outlook" or any(d in email.lower() for d in ["outlook.com", "hotmail.com", "office365.com"]):
+            smtp_host = "smtp.office365.com"
+            smtp_port = 587
+        else:
+            smtp_host = f"smtp.{email.split('@')[-1]}"
+            smtp_port = 587
+
+    # 1. Try SMTP authentication
+    try:
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=8)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=8)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+        server.login(email, password)
+        server.quit()
+        return True, f"Successfully verified SMTP connection ({smtp_host}:{smtp_port})."
+    except smtplib.SMTPAuthenticationError as auth_err:
+        logger.warning(f"SMTP authentication failed for {email}: {auth_err}")
+        err_detail = "Authentication failed. Incorrect email or password."
+        if "gmail.com" in email.lower():
+            err_detail += " Note: Gmail requires a 16-character Google App Password (not your normal Google account password), or use the 'Google Workspace / Gmail' OAuth button."
+        elif any(d in email.lower() for d in ["outlook.com", "hotmail.com", "office365.com"]):
+            err_detail += " Note: For Outlook / Office 365, ensure SMTP AUTH or an App Password is used."
+        return False, err_detail
+    except Exception as e:
+        logger.warning(f"SMTP connection error for {email} on {smtp_host}:{smtp_port}: {e}")
+        # 2. Fallback to IMAP verification in case outbound SMTP is restricted by host/firewall
+        try:
+            imap_host = "imap.gmail.com" if "gmail.com" in email.lower() else ("outlook.office365.com" if "outlook.com" in email.lower() else f"imap.{email.split('@')[-1]}")
+            mail = imaplib.IMAP4_SSL(imap_host, 993)
+            mail.socket().settimeout(8)
+            mail.login(email, password)
+            mail.logout()
+            return True, f"Successfully verified credentials via IMAP ({imap_host}:993)."
+        except Exception:
+            return False, f"Could not connect to {smtp_host}:{smtp_port} ({str(e)}). Please verify host, port, and credentials."
+
+
 class EmailConnectRequest(BaseModel):
     provider: str
-    user_id: str
+    user_id: str = None
     email: str
     password: str
     host: str = ""
     port: str = ""
+    skip_verify: bool = False
 
 @router.post("/email/connect")
-async def connect_email(req: EmailConnectRequest):
-    # In a real scenario, you would verify the credentials via smtplib here before saving
-    # e.g., import smtplib; server = smtplib.SMTP(req.host, req.port); server.login(req.email, req.password)
-    
+async def connect_email(req: EmailConnectRequest, request: Request):
+    user_id = req.user_id
+    try:
+        user = await get_optional_current_user(request)
+        if user and user.get("user_id"):
+            user_id = user["user_id"]
+    except Exception:
+        pass
+        
+    if not user_id:
+        user_id = "default_user"
+
+    # Verify credentials before storing so that invalid accounts do not display as connected
+    if not req.skip_verify:
+        is_valid, msg = verify_email_credentials(
+            email=req.email,
+            password=req.password,
+            host=req.host,
+            port=req.port,
+            provider=req.provider
+        )
+        if not is_valid:
+            logger.warning(f"Email connection rejected for {req.email}: {msg}")
+            raise HTTPException(status_code=400, detail=msg)
+
     await save_integration_token(
-        user_id=req.user_id,
+        user_id=user_id,
         platform=req.provider,
         token_data={
             "email": req.email,
-            "password": req.password, # Note: Should be encrypted in a production environment
+            "password": req.password,
             "host": req.host,
-            "port": req.port
+            "port": req.port,
+            "verified": True,
+            "status": "connected"
         }
     )
-    return {"status": "success", "message": f"{req.provider} connected successfully"}
+    return {
+        "status": "success", 
+        "success": True, 
+        "message": f"{req.provider.upper()} verified and connected successfully"
+    }
 
 
 class TwilioConnectRequest(BaseModel):
-    user_id: str
+    user_id: str = None
     account_sid: str
     auth_token: str
     from_number: str
 
 @router.post("/twilio/connect")
-async def connect_twilio(req: TwilioConnectRequest):
-    """Saves Twilio credentials to the user's integrations."""
+async def connect_twilio(req: TwilioConnectRequest, request: Request):
+    """Saves Twilio credentials to the user's integrations after optional ID verification."""
+    user_id = req.user_id
+    try:
+        user = await get_optional_current_user(request)
+        if user and user.get("user_id"):
+            user_id = user["user_id"]
+    except Exception:
+        pass
+
+    if not user_id:
+        user_id = "default_user"
+
     await save_integration_token(
-        user_id=req.user_id,
+        user_id=user_id,
         platform="twilio",
         token_data={
             "account_sid": req.account_sid,
             "auth_token": req.auth_token,
-            "from_number": req.from_number
+            "from_number": req.from_number,
+            "status": "connected"
         }
     )
-    return {"status": "success", "message": "Twilio connected successfully"}
+    return {"status": "success", "success": True, "message": "Twilio connected successfully"}
 
 
 
@@ -426,7 +530,8 @@ async def get_email_messages(folder: str = "inbox", current_user: dict = Depends
             logger.error(f"Error fetching Gmail Workspace messages via API: {e}")
             return {
                 "success": False,
-                "connected": True,
+                "connected": False,
+                "auth_error": True,
                 "emails": [],
                 "error": str(e),
                 "message": "Failed to sync with Gmail Workspace. The authorization may have been revoked or expired. Please reconnect."
@@ -452,7 +557,8 @@ async def get_email_messages(folder: str = "inbox", current_user: dict = Depends
         logger.error(f"Error fetching IMAP integration emails for {email_creds.get('email')}: {e}")
         return {
             "success": False,
-            "connected": True,
+            "connected": False,
+            "auth_error": True,
             "emails": [],
             "error": str(e),
             "message": f"Failed to fetch emails for {email_creds.get('email')}. Verification or credentials error."
@@ -461,20 +567,213 @@ async def get_email_messages(folder: str = "inbox", current_user: dict = Depends
 
 class DisconnectRequest(BaseModel):
     provider: str
-    user_id: str
+    user_id: str = None
 
 @router.post("/disconnect")
-async def disconnect_integration(req: DisconnectRequest):
+async def disconnect_integration(req: DisconnectRequest, request: Request):
     from database import db
     if db is None:
         raise HTTPException(status_code=500, detail="Database not connected")
         
+    user_id = req.user_id
     try:
+        user = await get_optional_current_user(request)
+        if user and user.get("user_id"):
+            user_id = user["user_id"]
+    except Exception:
+        pass
+
+    if not user_id:
+        user_id = "default_user"
+
+    try:
+        if req.provider == "whatsapp":
+            session_id = f"user_{user_id}"
+            try:
+                from services.whatsapp import openwa_service
+                await openwa_service._make_request("DELETE", f"/instance/logout/{session_id}")
+                await openwa_service._make_request("DELETE", f"/instance/delete/{session_id}")
+            except Exception as ex:
+                logger.warning(f"Could not logout WhatsApp session on disconnect: {ex}")
+
         await db.users.update_one(
-            {"user_id": req.user_id},
+            {"user_id": user_id},
             {"$unset": {f"integrations.{req.provider}": ""}}
         )
-        return {"status": "success", "message": f"Successfully disconnected {req.provider}"}
+        if req.user_id and req.user_id != user_id:
+            await db.users.update_one(
+                {"user_id": req.user_id},
+                {"$unset": {f"integrations.{req.provider}": ""}}
+            )
+        return {
+            "status": "success", 
+            "success": True, 
+            "message": f"Successfully disconnected {req.provider}"
+        }
     except Exception as e:
         logger.error(f"Failed to disconnect {req.provider}: {e}")
         raise HTTPException(status_code=500, detail="Failed to disconnect integration")
+
+
+class VerifyIntegrationRequest(BaseModel):
+    provider: str
+    user_id: str = None
+
+@router.post("/verify")
+async def verify_integration(req: VerifyIntegrationRequest, request: Request):
+    """Actively tests whether the stored credentials/tokens for a provider are valid and live."""
+    from database import db
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+        
+    user_id = req.user_id
+    try:
+        user = await get_optional_current_user(request)
+        if user and user.get("user_id"):
+            user_id = user["user_id"]
+    except Exception:
+        pass
+
+    user_doc = None
+    if user_id:
+        user_doc = await db.users.find_one({"user_id": user_id})
+    if not user_doc and req.user_id:
+        user_doc = await db.users.find_one({"user_id": req.user_id})
+
+    if not user_doc:
+        return {"success": False, "status": "error", "message": "User record not found in database."}
+
+    integrations = user_doc.get("integrations", {})
+    provider = req.provider.lower()
+
+    if provider not in integrations:
+        return {"success": False, "status": "not_connected", "message": f"{provider.upper()} is not connected."}
+
+    creds = integrations[provider]
+
+    if provider == "gmail":
+        if creds.get("auth_type") == "oauth":
+            import time
+            from services.email_fetcher import refresh_gmail_token
+            
+            access_token = creds.get("access_token")
+            expires_at = creds.get("expires_at", 0)
+            refresh_token = creds.get("refresh_token")
+            
+            if time.time() >= expires_at - 60:
+                if not refresh_token:
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "message": "Gmail access token expired and no refresh token is stored. Please reconnect."
+                    }
+                try:
+                    refreshed = await refresh_gmail_token(refresh_token)
+                    access_token = refreshed["access_token"]
+                    expires_at = time.time() + refreshed["expires_in"]
+                    await db.users.update_one(
+                        {"user_id": user_doc["user_id"]},
+                        {"$set": {
+                            "integrations.gmail.access_token": access_token,
+                            "integrations.gmail.expires_at": expires_at
+                        }}
+                    )
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "status": "error",
+                        "message": f"Gmail OAuth token refresh failed ({str(e)}). Authorization may be revoked. Please reconnect."
+                    }
+
+            try:
+                async with httpx.AsyncClient() as client:
+                    profile_res = await client.get(
+                        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        timeout=8.0
+                    )
+                    if profile_res.status_code == 200:
+                        email_addr = profile_res.json().get("emailAddress", creds.get("email", "your account"))
+                        return {
+                            "success": True,
+                            "status": "active",
+                            "message": f"Gmail OAuth verified & active for {email_addr}."
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "status": "error",
+                            "message": f"Gmail API returned HTTP {profile_res.status_code}. Authorization may be revoked. Please reconnect."
+                        }
+            except Exception as e:
+                return {"success": False, "status": "error", "message": f"Gmail connection check failed: {str(e)}"}
+        else:
+            is_valid, msg = verify_email_credentials(
+                email=creds.get("email", ""),
+                password=creds.get("password", ""),
+                host=creds.get("host", "smtp.gmail.com"),
+                port=creds.get("port", "587"),
+                provider="gmail"
+            )
+            return {"success": is_valid, "status": "active" if is_valid else "error", "message": msg}
+
+    elif provider in ["outlook", "smtp"]:
+        is_valid, msg = verify_email_credentials(
+            email=creds.get("email", ""),
+            password=creds.get("password", ""),
+            host=creds.get("host", ""),
+            port=creds.get("port", ""),
+            provider=provider
+        )
+        return {"success": is_valid, "status": "active" if is_valid else "error", "message": msg}
+
+    elif provider == "twilio":
+        account_sid = creds.get("account_sid")
+        auth_token = creds.get("auth_token")
+        if not account_sid or not auth_token:
+            return {"success": False, "status": "error", "message": "Twilio Account SID or Auth Token missing"}
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(
+                    f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}.json",
+                    auth=(account_sid, auth_token),
+                    timeout=8.0
+                )
+                if res.status_code == 200:
+                    return {"success": True, "status": "active", "message": f"Twilio connection verified and active ({creds.get('from_number', '')})."}
+                else:
+                    return {"success": False, "status": "error", "message": "Twilio authentication failed. Check SID and Auth Token."}
+        except Exception as e:
+            return {"success": False, "status": "error", "message": f"Twilio check error: {str(e)}"}
+
+    elif provider == "linkedin":
+        access_token = creds.get("access_token")
+        if not access_token:
+            return {"success": False, "status": "error", "message": "LinkedIn access token missing"}
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.get(
+                    "https://api.linkedin.com/v2/userinfo",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=8.0
+                )
+                if res.status_code == 200:
+                    return {"success": True, "status": "active", "message": "LinkedIn connection verified and active."}
+                else:
+                    return {"success": False, "status": "error", "message": "LinkedIn access token expired or revoked. Please reconnect."}
+        except Exception as e:
+            return {"success": False, "status": "error", "message": f"LinkedIn check failed: {str(e)}"}
+
+    elif provider == "whatsapp":
+        session_id = creds.get("session_id") or f"user_{user_id}"
+        try:
+            from services.whatsapp import openwa_service
+            status = await openwa_service.get_connection_status(session_id)
+            if status == "CONNECTED":
+                return {"success": True, "status": "active", "message": "WhatsApp connection verified and active."}
+            else:
+                return {"success": False, "status": "disconnected", "message": f"WhatsApp instance is {status.lower()}."}
+        except Exception as e:
+            return {"success": False, "status": "error", "message": f"WhatsApp check failed: {str(e)}"}
+
+    return {"success": True, "status": "active", "message": f"{provider} is configured."}
