@@ -43,10 +43,21 @@ class EmailFinder:
         if not name or not company_domain:
             return []
         
-        # Clean domain
+        # Clean and strictly validate domain
         domain = company_domain.lower().strip()
         domain = domain.replace("http://", "").replace("https://", "").replace("www.", "")
-        domain = domain.split("/")[0]  # Remove paths
+        domain = domain.split("/")[0].split("?")[0].strip()
+        
+        # Reject invalid characters or directory platforms
+        if any(bad in domain for bad in [
+            "@", ",", "&", "..", "crunchbase", "linkedin", "wellfound", "angel",
+            "google", "duckduckgo", "facebook", "twitter", "youtube", "instagram",
+            "wikipedia", "github", "medium", "x.com", "echai"
+        ]):
+            return []
+            
+        if not re.match(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z]{2,})+$', domain):
+            return []
         
         # Parse name
         parts = name.strip().split()
@@ -77,7 +88,12 @@ class EmailFinder:
         if not url:
             return ""
         url = url.lower().replace("http://", "").replace("https://", "").replace("www.", "")
-        return url.split("/")[0]
+        domain = url.split("/")[0].split("?")[0].strip()
+        if any(bad in domain for bad in ["crunchbase", "linkedin", "wellfound", "angel", "google", "wikipedia", "github", "twitter", "x.com"]):
+            return ""
+        if not re.match(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z]{2,})+$', domain):
+            return ""
+        return domain
 
     def score_email(self, email: str) -> float:
         """Score how likely an email is to be valid (basic heuristic)."""
@@ -102,17 +118,51 @@ class EmailFinder:
         
         return 0.5
 
+    async def check_email_details(self, email: str) -> dict:
+        """
+        Query Reacher to get full email verification details.
+        Supports both modern Reacher (POST / with to_emails) and legacy (POST /v0/check_email with to_email).
+        """
+        if not email or "@" not in email:
+            return {"is_reachable": "invalid", "error": "Invalid email format"}
+
+        base_url = settings.REACHER_API_URL.rstrip('/')
+        
+        # 1. Try modern Reacher endpoint: POST / with {"to_emails": [email]}
+        try:
+            response = await self.client.post(
+                f"{base_url}/",
+                json={"to_emails": [email]},
+                timeout=15
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list) and len(data) > 0:
+                    return data[0]
+                elif isinstance(data, dict):
+                    return data
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning(f"[Reacher] Connection issue on primary endpoint: {e}")
+        except Exception as e:
+            logger.debug(f"[Reacher] Primary endpoint check returned error: {e}")
+
+        # 2. Fallback to legacy endpoint: POST /v0/check_email with {"to_email": email}
+        try:
+            response = await self.client.post(
+                f"{base_url}/v0/check_email",
+                json={"to_email": email},
+                timeout=15
+            )
+            if response.status_code == 200:
+                return response.json()
+        except Exception as e:
+            logger.warning(f"[Reacher] Fallback check failed: {e}")
+
+        return {"is_reachable": "unknown", "error": "Reacher unavailable"}
+
     async def verify_email_exists(self, email: str) -> bool:
         """
-        Verify whether an email address actually exists using the locally hosted
-        Reacher Docker container (https://github.com/reacherhq/check-if-email-exists).
-
-        Reacher performs an SMTP handshake with the mail server without sending
-        a real email to check inbox existence. No external API key required.
-
-        Run the container before using this:
-            docker run -p 8080:8080 reacherhq/check-if-email-exists
-
+        Verify whether an email address actually exists using the hosted Reacher container.
         Returns:
             True  → email is safe or risky (usable in campaigns)
             False → email is invalid/unknown, or Reacher is unreachable
@@ -120,37 +170,58 @@ class EmailFinder:
         if not email or "@" not in email:
             return False
 
-        reacher_url = f"{settings.REACHER_API_URL.rstrip('/')}/v0/check_email"
-        payload = {"to_email": email}
+        details = await self.check_email_details(email)
+        reachability = details.get("is_reachable", "unknown")
+        logger.info(f"[Reacher] {email} → is_reachable={reachability}")
+        return reachability in REACHER_USABLE_STATUSES
+
+    async def verify_emails_batch(self, emails: List[str]) -> dict[str, bool]:
+        """
+        Batch verify multiple emails in a single Reacher request for maximum performance.
+        Returns a dict mapping {email: is_usable_bool}.
+        """
+        if not emails:
+            return {}
+
+        valid_candidates = [e for e in emails if e and "@" in e]
+        if not valid_candidates:
+            return {e: False for e in emails}
+
+        base_url = settings.REACHER_API_URL.rstrip('/')
+        results = {e: False for e in emails}
 
         try:
-            response = await self.client.post(reacher_url, json=payload, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-
-            reachability = data.get("is_reachable", "unknown")
-            logger.info(f"[Reacher] {email} → is_reachable={reachability}")
-
-            return reachability in REACHER_USABLE_STATUSES
-
-        except httpx.ConnectError:
-            logger.warning(
-                f"[Reacher] Docker container not running at {settings.REACHER_API_URL}. "
-                "Skipping verification for this email. "
-                "Start it with: docker run -p 8080:8080 reacherhq/check-if-email-exists"
+            response = await self.client.post(
+                f"{base_url}/",
+                json={"to_emails": valid_candidates},
+                timeout=25
             )
-            return False
-        except httpx.TimeoutException:
-            logger.warning(f"[Reacher] Timeout verifying {email}. Skipping.")
-            return False
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list):
+                    for item in data:
+                        inp = item.get("input", "")
+                        reachability = item.get("is_reachable", "unknown")
+                        is_usable = reachability in REACHER_USABLE_STATUSES
+                        if inp:
+                            results[inp] = is_usable
+                            logger.info(f"[Reacher Batch] {inp} → is_reachable={reachability} (usable={is_usable})")
+                    return results
         except Exception as e:
-            logger.error(f"[Reacher] Unexpected error verifying {email}: {e}")
-            return False
+            logger.warning(f"[Reacher Batch] Batch endpoint failed ({e}), falling back to individual checks")
+
+        # Fallback to individual checks if batch failed
+        tasks = [self.verify_email_exists(e) for e in valid_candidates]
+        indiv_results = await asyncio.gather(*tasks, return_exceptions=True)
+        for e, res in zip(valid_candidates, indiv_results):
+            results[e] = res if isinstance(res, bool) else False
+
+        return results
 
     async def get_verified_email(self, name: str, domain: str) -> tuple[Optional[str], bool]:
         """
         Generate all possible email permutations for a person, verify each one
-        against the local Reacher instance in parallel, and return the first that
+        against Reacher (using fast batch verification), and return the first that
         passes verification.
 
         Falls back to the highest-scored guess (no verification) if Reacher is
@@ -169,19 +240,17 @@ class EmailFinder:
 
         logger.info(f"[EmailFinder] Verifying {len(candidates)} email permutations for '{name}' @ '{domain}'")
 
-        # Run all verifications concurrently for speed
-        verification_tasks = [self.verify_email_exists(email) for email in candidates]
-        results = await asyncio.gather(*verification_tasks, return_exceptions=True)
+        # Use batch verification for speed
+        batch_results = await self.verify_emails_batch(candidates)
 
-        for email, result in zip(candidates, results):
-            if result is True:
+        for email in candidates:
+            if batch_results.get(email) is True:
                 logger.info(f"[EmailFinder] ✓ Verified email found: {email}")
                 return email, True
 
-        # Reacher unavailable or no email passed — fall back to best heuristic guess
-        logger.info(f"[EmailFinder] No email verified by Reacher, falling back to best-scored guess for {name}.")
-        best_email = max(candidates, key=self.score_email, default=None)
-        return best_email, False
+        # Do not return fake/unverified emails if Reacher verification fails
+        logger.info(f"[EmailFinder] No email verified by Reacher for {name} @ {domain}. Leaving email blank.")
+        return None, False
 
     async def close(self):
         await self.client.aclose()

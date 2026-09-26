@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Plus, MoreVertical, Search, Calendar, PhoneCall, Mail, Share2, MessageCircle, X, Loader2, Image as ImageIcon, Send, Upload, Save, ChevronDown, ChevronRight, Mic, Sparkles, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../utils/api';
+import { getDisplayEmail } from './Leads';
 
 
 export default function Campaigns() {
@@ -1383,7 +1384,7 @@ export default function Campaigns() {
                                                     {lead.name || 'Unnamed'}
                                                     {campaignType === 'email' && lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 rounded leading-none">✓ Verified</span>}
                                                   </span>
-                                                  <span className="text-[10px] text-gray-500">{['sms', 'whatsapp'].includes(campaignType) ? lead.phone : lead.email}</span>
+                                                  <span className="text-[10px] text-gray-500">{['sms', 'whatsapp'].includes(campaignType) ? lead.phone : getDisplayEmail(lead)}</span>
                                                 </div>
                                               </label>
                                             );
@@ -1642,7 +1643,7 @@ export default function Campaigns() {
                                           {lead.name || 'Unnamed'}
                                           {!isSmsOrCall && lead.is_verified && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded leading-none">✓ Verified</span>}
                                         </span>
-                                        <span className="text-xs text-gray-500">{isSmsOrCall ? lead.phone : lead.email}</span>
+                                        <span className="text-xs text-gray-500">{isSmsOrCall ? lead.phone : getDisplayEmail(lead)}</span>
                                       </div>
                                     </label>
                                   );

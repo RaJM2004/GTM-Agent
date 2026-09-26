@@ -56,9 +56,13 @@ async def save_leads(leads: list, prompt: str, user_id: str = ""):
                 
             if or_conditions:
                 query["$or"] = or_conditions
+                set_fields = {k: v for k, v in lead_dict.items() if v and k in ['phone', 'email', 'website', 'is_verified', 'has_whatsapp', 'confidence', 'location']}
+                update_op = {"$setOnInsert": lead_dict}
+                if set_fields:
+                    update_op["$set"] = set_fields
                 result = await collection.update_one(
                     query,
-                    {"$setOnInsert": lead_dict},
+                    update_op,
                     upsert=True
                 )
                 if result.upserted_id:

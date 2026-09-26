@@ -100,9 +100,12 @@ class GoogleSearchScraper:
         job_title = segs[1] if len(segs) > 1 else ""
         company = segs[2] if len(segs) > 2 else ""
 
-        if " at " in job_title:
-            parts = job_title.split(" at ", 1)
-            job_title, company = parts[0].strip(), parts[1].strip()
+        # Handle separators in job_title like " at ", " @ ", "@", ", ", " | "
+        for sep in [" at ", " At ", " @ ", "@", " | ", ", "]:
+            if sep in job_title:
+                parts = job_title.split(sep, 1)
+                job_title, company = parts[0].strip(), parts[1].strip()
+                break
 
         # If company not in title segments, attempt extraction from snippet
         if not company:
@@ -111,12 +114,29 @@ class GoogleSearchScraper:
                 curr_text = current_m.group(1).strip()
                 if " at " in curr_text:
                     company = curr_text.split(" at ", 1)[1].strip()
+                elif " @ " in curr_text:
+                    company = curr_text.split(" @ ", 1)[1].strip()
                 else:
                     company = curr_text
 
-        # Extract email if directly present in snippet
-        email_m = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', snippet)
-        email = email_m.group(0) if email_m and not email_m.group(0).endswith("linkedin.com") else ""
+        # Clean company name: remove role/title prefixes that bleed into company
+        if company:
+            company = re.sub(r'^(?:founder\s*&\s*ceo|co-founder\s*&\s*ceo|founder\s*&\s*cto|co-founder\s*&\s*cto|founder\s*&\s*cpo|founder\s*&\s*cmd|founder|co-founder|ceo|cto|cpo|director|cmd|president|vp|partner|managing\s+director)\b\s*[@,:\-–]?\s*', '', company, flags=re.I).strip()
+            # Remove trailing ellipsis or location leakage
+            company = re.sub(r'\.\.\.+$', '', company).strip()
+            company = re.sub(r'\s*[-–|].*$', '', company).strip()
+            # Remove trailing city names
+            for city in ["Hyderabad", "Bengaluru", "Bangalore", "Mumbai", "Delhi", "Pune", "Chennai", "India"]:
+                if f", {city}" in company or f" {city}" in company:
+                    company = re.split(re.escape(city), company, flags=re.I)[0].rstrip(", -–|").strip()
+
+        # Extract email only if genuinely formatted and not a role string
+        email_m = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b', snippet)
+        email = ""
+        if email_m:
+            cand = email_m.group(0).lower()
+            if not any(bad in cand for bad in ["linkedin.com", "founder@", "ceo@", "cto@"]):
+                email = cand
 
         # Extract phone if present
         phone_m = re.search(r'(?:\+\d{1,3}[-.\s]?)?\(?\d{2,5}\)?[-.\s]?\d{3,5}[-.\s]?\d{3,5}', snippet)
@@ -159,7 +179,8 @@ class GoogleSearchScraper:
             name=name,
             title=job_title,
             company=company,
-            website=link,
+            website="", # NEVER use crunchbase.com as the company website
+            linkedin_url=link,
             source="crunchbase",
             confidence=0.80
         )

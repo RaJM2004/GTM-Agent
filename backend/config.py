@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     VAPI_WEBHOOK_URL: str = os.getenv("VAPI_WEBHOOK_URL", "")
 
     # Email Verification (Reacher - self-hosted via Docker)
-    REACHER_API_URL: str = os.getenv("REACHER_API_URL", "http://localhost:8080")
+    REACHER_API_URL: str = os.getenv("REACHER_API_URL", "https://reacher.livelysmoke-eb748d53.centralindia.azurecontainerapps.io")
     
     # WhatsApp (Evolution API) Config
     EVOLUTION_API_URL: str = os.getenv("EVOLUTION_API_URL", "https://evolution-api.livelysmoke-eb748d53.centralindia.azurecontainerapps.io")

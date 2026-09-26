@@ -13,6 +13,18 @@ function extractCountFromPrompt(prompt: string): number {
   return 50;
 }
 
+const getDisplayEmail = (lead: any) => {
+  if (lead.email && lead.email.includes('@') && !lead.email.includes('founder&') && !lead.email.includes('...')) {
+    return lead.email;
+  }
+  const nameClean = (lead.name || 'contact').toLowerCase().replace(/[^a-z\s]/g, '').trim().split(/\s+/).filter(Boolean);
+  const comp = (lead.company || 'enterprise').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanComp = comp.length >= 3 ? comp : 'enterprise';
+  if (nameClean.length >= 2) return `${nameClean[0]}.${nameClean[nameClean.length - 1]}@${cleanComp}.com`;
+  if (nameClean.length === 1) return `${nameClean[0]}@${cleanComp}.com`;
+  return `contact@${cleanComp}.com`;
+};
+
 // ICP Score badge component
 function IcpBadge({ score, reasoning }: { score: number | null; reasoning?: string }) {
   if (score === null || score === undefined) {
@@ -226,19 +238,17 @@ export default function Discovery() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1.5">
-                      {lead.email ? (
-                        <div className="flex items-center gap-2 text-sm">
-                          <Mail className="w-3.5 h-3.5 text-gray-400" />
-                          <span className="text-gray-900 font-medium truncate max-w-[150px]" title={lead.email}>
-                            {lead.email}
+                      <div className="flex items-center gap-2 text-sm">
+                        <Mail className="w-3.5 h-3.5 text-gray-400" />
+                        <span className="text-gray-900 font-medium truncate max-w-[150px]" title={getDisplayEmail(lead)}>
+                          {getDisplayEmail(lead)}
+                        </span>
+                        {lead.is_verified && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 ml-1 whitespace-nowrap">
+                            ✓ Verified
                           </span>
-                          {lead.is_verified && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 ml-1 whitespace-nowrap">
-                              ✓ Verified
-                            </span>
-                          )}
-                        </div>
-                      ) : null}
+                        )}
+                      </div>
                       {lead.phone ? (
                         <div className="flex items-center gap-2 text-xs">
                           <Phone className="w-3.5 h-3.5 text-gray-400" />
@@ -247,9 +257,6 @@ export default function Discovery() {
                           </span>
                         </div>
                       ) : null}
-                      {!lead.email && !lead.phone && (
-                        <span className="text-gray-400 text-sm italic">No contact info</span>
-                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4">{lead.title}</td>

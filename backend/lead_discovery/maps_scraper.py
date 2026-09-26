@@ -50,7 +50,7 @@ class GoogleMapsScraper:
                         name=name,
                         title=f"{industry.title()} Business" if industry else "Company",
                         company=name,
-                        phone=place.get("nationalPhoneNumber", ""),
+                        phone=place.get("internationalPhoneNumber") or place.get("nationalPhoneNumber", ""),
                         website=place.get("websiteUri", ""),
                         location=place.get("formattedAddress", ""),
                         source="google_maps",
@@ -67,7 +67,7 @@ class GoogleMapsScraper:
     async def _text_search(self, query: str) -> List[Dict]:
         headers = {
             "X-Goog-Api-Key": self.api_key,
-            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri",
+            "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri",
             "Content-Type": "application/json"
         }
         body = {"textQuery": query}

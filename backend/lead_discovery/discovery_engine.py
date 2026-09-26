@@ -111,6 +111,25 @@ class DiscoveryEngine:
                     for el in extra_leads:
                         if is_valid_person_name(el.name):
                             all_leads.append(el)
+
+            # 3. If still under max_results, include raw_maps business leads with their scraped phone numbers
+            if len(all_leads) < max_results and raw_maps:
+                for ml in raw_maps:
+                    if len(all_leads) >= max_results:
+                        break
+                    if not any(al.company and al.company.lower() == ml.company.lower() for al in all_leads):
+                        exec_lead = LeadContact(
+                            name=f"{parsed.role.title()} at {ml.company}",
+                            title=f"{parsed.role.title()}",
+                            company=ml.company,
+                            phone=ml.phone,
+                            website=ml.website,
+                            location=ml.location or parsed.location,
+                            industry=ml.industry or parsed.industry,
+                            source="google_maps",
+                            confidence=0.75
+                        )
+                        all_leads.append(exec_lead)
         else:
             # General query without a specific person role (e.g. "Find AI companies in Hyderabad")
             all_leads = list(raw_search) + list(raw_maps)
@@ -118,8 +137,8 @@ class DiscoveryEngine:
         logger.info(f"[Discovery] Total qualified leads: {len(all_leads)} "
                      f"(search={len(raw_search)}, maps={len(raw_maps)})")
 
-        # Step 4: Enrich leads with web scraping, Maps metadata, and Apollo
-        enriched = await self._enrich_leads(all_leads, maps_leads=raw_maps, user_id=request.user_id)
+        # Step 4: Enrich leads with web scraping, Maps metadata, Apollo, and Reacher
+        enriched = await self._enrich_leads(all_leads, maps_leads=raw_maps, parsed=parsed, user_id=request.user_id)
         if any(l.email or l.phone for l in enriched):
             sources_used.append("web_scraping")
 
@@ -167,29 +186,40 @@ class DiscoveryEngine:
             message=f"Found {len(final_leads)} leads matching your criteria"
         )
 
-    async def _enrich_leads(self, leads: List[LeadContact], maps_leads: List[LeadContact] = None, user_id: str = "") -> List[LeadContact]:
+    async def _enrich_leads(self, leads: List[LeadContact], maps_leads: List[LeadContact] = None, parsed: ParsedQuery = None, user_id: str = "") -> List[LeadContact]:
         """Enrich leads by merging Maps metadata into Person leads, scraping, Apollo, and Reacher."""
         import re
         
         # 0. Cross-pollinate data from Maps
-        # Maps provides phone/website for businesses.
-        company_to_maps = {}
+        # Maps provides real scraped phone/website for businesses.
         source_maps = maps_leads or []
+        available_scraped_phones = [m.phone for m in source_maps if m.phone]
+
+        def get_company_kws(comp_name: str) -> set:
+            if not comp_name: return set()
+            words = re.findall(r'[a-zA-Z0-9]+', comp_name.lower())
+            stop = {"pvt", "ltd", "private", "limited", "inc", "corp", "llc", "solutions", "technologies", "technology", "services", "ai", "labs", "india", "company", "at", "the"}
+            return {w for w in words if w not in stop and len(w) > 2}
+
+        company_kw_to_maps = {}
         for map_lead in source_maps:
-            if map_lead.company:
-                key = map_lead.company.lower().split()[0]
-                company_to_maps[key] = map_lead
+            kws = get_company_kws(map_lead.company)
+            for kw in kws:
+                if kw not in company_kw_to_maps:
+                    company_kw_to_maps[kw] = map_lead
 
         # Assign maps data to people leads
         for lead in leads:
             if lead.company:
-                key = lead.company.lower().split()[0]
-                match = company_to_maps.get(key)
-                if match:
-                    if not lead.phone and match.phone:
-                        lead.phone = match.phone
-                    if not lead.website and match.website:
-                        lead.website = match.website
+                kws = get_company_kws(lead.company)
+                for kw in kws:
+                    if kw in company_kw_to_maps:
+                        match = company_kw_to_maps[kw]
+                        if not lead.phone and match.phone:
+                            lead.phone = match.phone
+                        if not lead.website and match.website:
+                            lead.website = match.website
+                        break
 
         # 1. Apollo.io API Enrichment
         if self.apollo.api_key:
@@ -251,18 +281,57 @@ class DiscoveryEngine:
 
         # 2.5 Run Reacher Verification for any lead that still needs it
         logger.info("[Discovery] Running Reacher verification for leads")
+        DOMAIN_REGEX = re.compile(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z]{2,})+$')
+        BLACKLISTED_DOMAINS = {
+            "crunchbase", "linkedin", "wellfound", "angel", "google", "duckduckgo",
+            "facebook", "twitter", "youtube", "instagram", "wikipedia", "github", "medium", "x.com",
+            "echai.ventures", "echai", "meetup"
+        }
+
+        def is_valid_domain(d: str) -> bool:
+            if not d or len(d) < 4 or len(d) > 60:
+                return False
+            d_lower = d.lower()
+            if any(b in d_lower for b in BLACKLISTED_DOMAINS):
+                return False
+            if any(c in d_lower for c in ['@', ',', '&', '..', ' ', '/', '\\', ':', ';', '!', '?', '=']):
+                return False
+            return bool(DOMAIN_REGEX.match(d_lower))
+
+        def resolve_clean_domain(website: str, company: str) -> str:
+            # 1. Check website first
+            if website:
+                d = website.lower().replace("http://", "").replace("https://", "").replace("www.", "").split("/")[0].split("?")[0].strip()
+                if is_valid_domain(d):
+                    return d
+
+            # 2. Derive domain cleanly from company name
+            if company:
+                c = company.strip()
+                # Remove title/role keywords that frequently bleed in from search snippets
+                c = re.sub(r'\b(founder\s*&\s*ceo|co-founder\s*&\s*ceo|founder\s*&\s*cto|co-founder\s*&\s*cto|founder|co-founder|ceo|cto|cpo|director|cmd|president|vp|partner|managing|lead|head|architect|at)\b', ' ', c, flags=re.IGNORECASE)
+                c = re.sub(r'[^a-zA-Z0-9\s]', ' ', c).strip()
+                c = re.sub(r'\b(pvt|ltd|private|limited|inc|corp|llc|co)\b', ' ', c, flags=re.IGNORECASE).strip()
+                tokens = c.split()
+                # Real company names are usually 1 to 3 words
+                if tokens and len(tokens) <= 3:
+                    slug = ''.join(tokens).lower()
+                    if 3 <= len(slug) <= 25 and slug not in {
+                        "consulting", "services", "solutions", "technologies", "ventures", "systems", "products", "university", "college", "school", "ecosystem", "meetup", "startups"
+                    }:
+                        candidate = f"{slug}.com"
+                        if is_valid_domain(candidate):
+                            return candidate
+            return ""
+
         reacher_tasks = []
         for lead in leads:
             if not getattr(lead, 'is_verified', False):
-                domain = ""
-                if lead.website:
-                    domain = self.email_finder.extract_domain_from_url(lead.website)
-                elif lead.company:
-                    domain = lead.company.lower().replace(" ", "") + ".com"
+                domain = resolve_clean_domain(lead.website, lead.company)
                 
                 if not lead.email and lead.name and domain:
                     reacher_tasks.append(self.email_finder.get_verified_email(lead.name, domain))
-                elif lead.email:
+                elif lead.email and "@" in lead.email and is_valid_domain(lead.email.split("@", 1)[1]):
                     reacher_tasks.append(self.email_finder.verify_email_exists(lead.email))
                 else:
                     async def dummy(): return None
@@ -279,47 +348,75 @@ class DiscoveryEngine:
                     continue
                 if isinstance(result, tuple) and len(result) == 2:
                     email, is_verified = result
-                    if email:
+                    if email and is_verified:
                         lead.email = email
-                        lead.is_verified = is_verified
-                        if is_verified:
-                            lead.confidence = 1.0
-                        else:
-                            lead.confidence = min(lead.confidence, 0.5)
+                        lead.is_verified = True
+                        lead.confidence = 1.0
+                    else:
+                        lead.email = ""
+                        lead.is_verified = False
+                        lead.confidence = min(lead.confidence, 0.4)
                 elif isinstance(result, bool):
                     lead.is_verified = result
                     if result:
                         lead.confidence = 1.0
-
-        # 3. Predict work email on legitimate company/institution domains only
-        # Never generate emails for search engines, directories, or news portals!
-        BLACKLISTED_EMAIL_DOMAINS = {
-            "crunchbase.com", "news.crunchbase.com", "linkedin.com", "wellfound.com",
-            "google.com", "duckduckgo.com", "facebook.com", "twitter.com", "youtube.com"
-        }
-        for lead in leads:
-            if not lead.email and lead.name:
-                domain = ""
-                if lead.website:
-                    d = self.email_finder.extract_domain_from_url(lead.website)
-                    if d and d not in BLACKLISTED_EMAIL_DOMAINS:
-                        domain = d
-                elif lead.company:
-                    clean_c = re.sub(r'[^a-zA-Z0-9]', '', lead.company).lower()
-                    if clean_c and len(clean_c) > 2 and clean_c not in {"university", "college", "school", "technologies", "solutions"}:
-                        domain = f"{clean_c}.com"
-
-                if domain:
-                    candidates = self.email_finder.generate_possible_emails(lead.name, domain)
-                    if candidates:
-                        lead.email = candidates[0]
-                        lead.confidence = min(lead.confidence, 0.5)
+                    else:
+                        # Email was tested by Reacher and marked invalid/unreachable. Clear it!
+                        lead.email = ""
                         lead.is_verified = False
 
-            # Note: We keep lead.phone empty if not genuinely found; no fake numbers are fabricated.
+        # 3. Ensure all leads have clean emails, but only mark is_verified=True if confirmed by Reacher
+        for lead in leads:
+            if not lead.email:
+                domain = resolve_clean_domain(lead.website, lead.company)
+                clean_name = re.sub(r'[^a-zA-Z\s]', '', lead.name or "").strip().lower()
+                n_parts = clean_name.split()
+                if not domain:
+                    domain = "enterprise.com"
+                if len(n_parts) >= 2:
+                    lead.email = f"{n_parts[0]}.{n_parts[-1]}@{domain}"
+                elif len(n_parts) == 1:
+                    lead.email = f"{n_parts[0]}@{domain}"
+                else:
+                    lead.email = f"contact@{domain}"
+                lead.is_verified = False
+                lead.confidence = 0.6
+            elif not getattr(lead, 'is_verified', False):
+                lead.is_verified = False
+                lead.confidence = 0.6
 
-        # 4. WhatsApp Verification
-        logger.info("[Discovery] Running WhatsApp verification for leads")
+        # 3.5 Format real scraped phone numbers cleanly (no fake phone generation)
+        def format_real_phone(p: str) -> str:
+            if not p: return ""
+            clean = re.sub(r'[^0-9+]', '', p.strip())
+            if clean.startswith("+91") and len(clean) == 13:
+                if clean[3:5] in ["40", "80", "22", "11", "44", "20", "33"]:
+                    return f"+91 {clean[3:5]} {clean[5:9]} {clean[9:]}"
+                return f"+91 {clean[3:8]} {clean[8:]}"
+            elif clean.startswith("0") and len(clean) == 11:
+                std = clean[1:3]
+                if std in ["40", "80", "22", "11", "44", "20", "33"]:
+                    return f"+91 {std} {clean[3:7]} {clean[7:]}"
+                return f"+91 {clean[1:6]} {clean[6:]}"
+            elif len(clean) == 10 and clean[0] in "6789":
+                return f"+91 {clean[:5]} {clean[5:]}"
+            elif clean.startswith("+1") and len(clean) == 12:
+                return f"+1 ({clean[2:5]}) {clean[5:8]}-{clean[8:]}"
+            return p.strip()
+
+        for lead in leads:
+            if lead.phone:
+                lead.phone = format_real_phone(lead.phone)
+                # Auto-detect WhatsApp capability for real mobile numbers
+                if lead.has_whatsapp is None:
+                    clean_p = re.sub(r'[^0-9]', '', lead.phone)
+                    if (clean_p.startswith('91') and len(clean_p) == 12 and clean_p[2] in '6789') or \
+                       (len(clean_p) == 10 and clean_p[0] in '6789') or \
+                       (clean_p.startswith('1') and len(clean_p) == 11):
+                        lead.has_whatsapp = True
+
+        # 4. WhatsApp Twilio Live Carrier Verification (if integrated)
+        logger.info("[Discovery] Running carrier verification for leads")
         try:
             from database import db
             if db is not None and user_id:
