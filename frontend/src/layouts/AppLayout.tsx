@@ -20,7 +20,8 @@ import {
   Contact,
   Coins,
   ShieldAlert,
-  MessageCircle
+  MessageCircle,
+  Bot
 } from 'lucide-react';
 import NotificationBell from '../components/NotificationBell';
 
@@ -36,6 +37,7 @@ const navigation = [
   { name: 'Analytics', href: '/app/analytics', icon: BarChart3 },
   { name: 'Billing', href: '/app/billing', icon: CreditCard },
   { name: 'Integrations', href: '/app/integrations', icon: Plug },
+  { name: 'WhatsApp Bot', href: '/app/whatsapp-bot', icon: Bot },
   { name: 'WhatsApp Logs', href: '/app/whatsapp-logs', icon: MessageCircle },
 ];
 

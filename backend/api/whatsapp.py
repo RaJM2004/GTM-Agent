@@ -230,26 +230,87 @@ async def openwa_webhook(request: Request):
             
             # Ensure it's not a message we sent out (fromMe = false means it's incoming)
             if not key.get("fromMe") and key.get("remoteJid"):
-                # Extract phone number (remove @s.whatsapp.net)
-                phone_number = key.get("remoteJid").split("@")[0]
+                raw_jid = key.get("remoteJid", "")
+                raw_phone = raw_jid.split("@")[0]
                 instance_name = payload.get("instance", "")
                 
                 # Instance names are formatted as user_{user_id}
                 user_id = instance_name.replace("user_", "") if instance_name.startswith("user_") else "unknown"
+                lead_name = data.get("pushName") or "there"
+
+                # Resolve LID if incoming message is from a WhatsApp Linked Device (LID)
+                target_phone = raw_phone
+                if "@lid" in raw_jid or len(raw_phone) > 13:
+                    import database
+                    db = database.db
+                    if db is not None:
+                        # 1. Check cached mapping
+                        cached = await db.whatsapp_lid_mappings.find_one({"$or": [{"lid": raw_jid}, {"lid": raw_phone}]})
+                        if cached and cached.get("phone"):
+                            target_phone = cached["phone"]
+                        else:
+                            # 2. Check logs by LID or pushName
+                            log_match = await db.whatsapp_logs.find_one({
+                                "$or": [
+                                    {"lid": {"$regex": raw_phone}},
+                                    {"reply_push_name": lead_name} if lead_name != "there" else {"lid": raw_phone}
+                                ]
+                            })
+                            if log_match and log_match.get("phone_number"):
+                                target_phone = log_match["phone_number"]
+                            else:
+                                # 3. Check leads
+                                if lead_name and lead_name != "there":
+                                    lead_match = await db.leads.find_one({
+                                        "name": {"$regex": lead_name.strip(), "$options": "i"},
+                                        "phone": {"$exists": True, "$ne": ""}
+                                    })
+                                    if lead_match and lead_match.get("phone"):
+                                        target_phone = lead_match["phone"]
+
+                        if target_phone and target_phone != raw_phone and "@lid" not in target_phone:
+                            import datetime
+                            await db.whatsapp_lid_mappings.update_one(
+                                {"lid": raw_jid},
+                                {"$set": {"lid": raw_jid, "phone": target_phone, "push_name": lead_name, "updated_at": datetime.datetime.utcnow()}},
+                                upsert=True
+                            )
+
+                phone_number = target_phone
                 
+                # Extract incoming text
+                msg_obj = message or {}
+                message_text = (
+                    msg_obj.get("conversation") or 
+                    msg_obj.get("extendedTextMessage", {}).get("text") or 
+                    ""
+                )
+
                 # Update the message status in the database to Replied
                 updated = await update_whatsapp_status(user_id=user_id, phone_number=phone_number)
                 
+                # Trigger WhatsApp Bot automated response engine in background
+                from api.whatsapp_bot import process_incoming_whatsapp_bot
+                import asyncio
+                asyncio.create_task(
+                    process_incoming_whatsapp_bot(
+                        user_id=user_id,
+                        phone_number=phone_number,
+                        message_text=message_text,
+                        lead_name=lead_name
+                    )
+                )
+
                 if updated:
                     # Trigger notification for the user
                     await create_notification(
                         user_id=user_id,
                         title="New WhatsApp Reply",
-                        message=f"You received a new WhatsApp reply from {phone_number}.",
+                        message=f"You received a new WhatsApp reply from {phone_number}: \"{message_text[:40]}\"",
                         type="whatsapp_reply",
-                        link=f"/app/leads?phone={phone_number}"
+                        link=f"/app/whatsapp-bot"
                     )
-                    logger.info(f"Updated status to Replied and sent notification for {phone_number} to user {user_id}")
+                    logger.info(f"Updated status to Replied and triggered WhatsApp Bot for {phone_number} (user: {user_id})")
 
         # Handle delivery & read status updates (Blue Tick / Double Grey Tick)
         elif event == "messages.update":
