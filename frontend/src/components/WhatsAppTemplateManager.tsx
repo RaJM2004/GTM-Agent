@@ -5,7 +5,6 @@ import {
   ExternalLink,
   Plus,
   Trash2,
-  Copy,
   Check,
   Sparkles,
   Smartphone,
@@ -17,9 +16,7 @@ import {
   FileSpreadsheet,
   AlertCircle,
   Save,
-  CheckCircle2,
   RefreshCw,
-  Info,
   X
 } from 'lucide-react';
 import { apiFetch } from '../utils/api';
@@ -134,7 +131,6 @@ export default function WhatsAppTemplateManager({
   onApplyToBot
 }: WhatsAppTemplateManagerProps) {
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
@@ -187,7 +183,6 @@ export default function WhatsAppTemplateManager({
   }, []);
 
   const fetchTemplates = async () => {
-    setLoading(true);
     try {
       const data = await apiFetch('/api/whatsapp-bot/templates');
       if (data.status === 'success' && data.templates) {
@@ -195,8 +190,6 @@ export default function WhatsAppTemplateManager({
       }
     } catch (err) {
       console.error('Failed to fetch templates:', err);
-    } finally {
-      setLoading(false);
     }
   };
 

@@ -1,36 +1,21 @@
 import { useState, useEffect } from 'react';
 import {
   Bot,
-  Zap,
-  CheckCircle2,
-  XCircle,
-  HelpCircle,
-  Play,
-  RotateCcw,
-  Save,
   Send,
   Plus,
   X,
-  Volume2,
-  Image as ImageIcon,
   Check,
-  CheckCheck,
-  Smartphone,
   ExternalLink,
   RefreshCw,
   Power,
-  ShieldCheck,
   Sparkles,
   UserCheck,
   MessageSquare,
-  MessageCircle,
   FileText,
   Copy,
   Trash2,
   Edit2,
   QrCode,
-  LogOut,
-  Tag,
   ArrowRight,
   Phone,
   Layers,
@@ -43,11 +28,8 @@ export default function WhatsAppBot() {
   const [activeTab, setActiveTab] = useState<'hub' | 'editor' | 'sessions'>('hub');
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<string>('DISCONNECTED');
-  const [connectedNumber, setConnectedNumber] = useState<string>('');
-  const [sessionId, setSessionId] = useState<string>('');
   const [isBotEnabled, setIsBotEnabled] = useState<boolean>(true);
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
-  const [loadingTemplates, setLoadingTemplates] = useState<boolean>(false);
   const [editingTemplate, setEditingTemplate] = useState<WhatsAppTemplate | null>(null);
   const [sessions, setSessions] = useState<any[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -91,7 +73,6 @@ export default function WhatsAppBot() {
       const data = await apiFetch('/api/whatsapp-bot/config');
       if (data.status === 'success') {
         setConnectionStatus(data.whatsapp_status || (data.whatsapp_connected ? 'CONNECTED' : 'DISCONNECTED'));
-        setSessionId(data.session_id || '');
         if (data.config) {
           setIsBotEnabled(data.config.is_enabled ?? true);
         }
@@ -102,7 +83,6 @@ export default function WhatsAppBot() {
   };
 
   const fetchTemplates = async () => {
-    setLoadingTemplates(true);
     try {
       const data = await apiFetch('/api/whatsapp-bot/templates');
       if (data.status === 'success' && data.templates) {
@@ -110,8 +90,6 @@ export default function WhatsAppBot() {
       }
     } catch (err) {
       console.error('Failed to load templates:', err);
-    } finally {
-      setLoadingTemplates(false);
     }
   };
 
